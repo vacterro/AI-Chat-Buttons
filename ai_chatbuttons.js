@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI ChatButtons
-// @namespace    https://github.com/local/ai-chatbuttons
-// @version      7.5.1
+// @namespace    https://github.com/vacterro/AI-Chat-Buttons
+// @version      0.0.1
 // @description  Robust AI ChatButtons — Vintage Switchblade (Wider Symmetric Buttons)
 // @author       AI ChatButtons
 // @match        https://chat.openai.com/*
