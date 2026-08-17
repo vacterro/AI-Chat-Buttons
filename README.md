@@ -1,5 +1,8 @@
 # AI Chat Buttons
 
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Version](https://img.shields.io/badge/version-0.0.1-green.svg)
+
 Universal AI prompt buttons for web-based AI chat interfaces. Provides customizable prompt buttons across multiple AI platforms.
 
 ## Version

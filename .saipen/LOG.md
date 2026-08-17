@@ -1,2 +1,4 @@
 - 18.08.26 00:00 [E-001] [INIT] DEC: Created SAIPEN state for AI Chat Buttons GitHub push. Fresh project, no prior state.
 - 18.08.26 00:00 [E-002] [T-001,T-002,T-003] BUILD: README.md + translations (EN/RU/ET) created, version set to 0.0.1 in AICHATBUTTONS.js.
+- 18.08.26 00:00 [E-003] [T-004,T-005] RUN: Git remote added, pushed to https://github.com/vacterro/AI-Chat-Buttons. All tickets completed.
+- 18.08.26 00:00 [E-004] [HUNT] RUN: hunt -> missing LICENSE, .gitignore, CONTRIBUTING.md, badges. Created T-006-T-009.
