@@ -3,6 +3,7 @@
 ## DOING
 
 ## TODO
+- [ ] T-010 Duplicate userscript entry: AICHATBUTTONS.js and ai_chatbuttons.js both present at @version 0.0.1; unclear which is canonical / likely legacy dead code | verify: confirm current script; remove or document the other
 
 ## DONE
 - [x] T-001 AI Chat Buttons - README + EN/RU/ET translations (v0.0.1)
