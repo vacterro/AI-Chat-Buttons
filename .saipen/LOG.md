@@ -7,4 +7,5 @@
 - 18.08.26 02:00 [E-006] [SHIP] DEC: SAIPEN STATE/BOARD/LOG normalized to schema_version 3 by opencode (handoff from devin).
 - 18.08.26 02:00 [E-007] [SHIP] RUN: committed + pushed final state to origin/master.
 - 18.08.26 02:30 [E-008] [HUNT] RUN: hunt sweep (6 signals) -> 1 finding: duplicate userscript entry (AICHATBUTTONS.js vs ai_chatbuttons.js). Ticket T-010.
-- 18.08.26 02:30 [E-009] [HUNT] DEC: STATE -> PLAN (findings logged, awaiting fix decision).
+- 18.08.26 02:30 [E-009] [HUNT] DEC: STATE -> PLAN (findings logged, awaiting fix decision).- 20.08.26 00:00 [E-010] [T-010] DEC: T-010 resolved via ai_chatbuttons.js deletion; .saipen refreshed from stale v0.0.1/HUNT world to live v0.0.15 W2 repair wave; cc = continue work
+- 20.08.26 00:00 [E-011] [W2] RUN: W2-001..W2-007 all repaired+tested. 63/63 regression tests pass, node --check clean. OpenCodeConfigFixer.ps1 patcher verified idempotent. STATE/BOARD updated; commit+push pending
