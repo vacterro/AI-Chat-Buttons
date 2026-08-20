@@ -719,8 +719,10 @@
   let pendingAction = null;
   let actionInFlight = false;
   let viewportSyncFrame = 0;
+  let dragFrame = 0;
   let autoAuditObserver = null;
   let autoAuditObserverRoot = null;
+  let autoAuditObservedConfig = null;
   let autoAuditCheckTimer = 0;
   let autoAuditNextTimer = 0;
   let autoAuditEvaluating = false;
@@ -2651,6 +2653,20 @@
 
     const now = Date.now();
     const current = readAutoLease(key);
+
+    // Fast path: an unexpired lease already owned by this tab is simply kept.
+    // No nonce churn, no storage write, no renewal-timer reshuffle. The
+    // periodic renewal timer performs extension at its own cadence, so routine
+    // evaluation cycles (every liveness check) never touch extension storage.
+    if (
+      !options.force &&
+      current &&
+      current.ownerId === autoInstanceId &&
+      current.expiresAt > now + AUTO_LEASE_RENEW_MS
+    ) {
+      return true;
+    }
+
     if (
       current &&
       current.expiresAt > now &&
@@ -2659,6 +2675,28 @@
       !options.force
     ) {
       return false;
+    }
+
+    // Self-owned lease inside the renewal margin: extend in place and keep the
+    // nonce, so pre-send fencing tokens stay stable across the extension. An
+    // EXPIRED self-owned lease is dead and is re-acquired fresh below.
+    if (current && current.ownerId === autoInstanceId && current.expiresAt > now) {
+      const candidate = {
+        ...current,
+        conversationKey: key,
+        expiresAt: now + AUTO_LEASE_TTL_MS,
+        updatedAt: now
+      };
+      if (!writeAutoLease(key, candidate)) return false;
+      const verified = readAutoLease(key);
+      const owns = Boolean(
+        verified &&
+        verified.ownerId === autoInstanceId &&
+        verified.nonce === current.nonce &&
+        verified.expiresAt > Date.now()
+      );
+      if (owns) scheduleAutoLeaseRenewal();
+      return owns;
     }
 
     const nonce = `${now.toString(36)}:${Math.random().toString(36).slice(2, 10)}`;
@@ -2856,35 +2894,34 @@
       turns.push(node);
     };
 
-    // Stable semantic source: authored user/assistant messages. ChatGPT has used
-    // section, article and other wrappers over time, so wrapper tag is not truth.
-    for (const message of document.querySelectorAll(
-      '[data-message-author-role="user"], [data-message-author-role="assistant"]'
-    )) {
-      const wrapper = message.closest(
-        'section[data-turn], article[data-turn], ' +
-        'section[data-testid^="conversation-turn-"], article[data-testid^="conversation-turn-"], ' +
-        '[data-testid^="conversation-turn-"]'
-      );
-      add(wrapper || message);
-    }
+    // One scoped discovery pass. The conversation root is the same canonical
+    // root the monitor observes, so discovery never scans the whole document.
+    // The union selector matches both turn wrappers (their own authoritative
+    // representation) and authored messages (hydration fallback), in document
+    // order; a wrapper precedes its own message subtree, so normalization to
+    // the wrapper keeps first occurrence, and the stable-key set deduplicates
+    // the overlapping representations without a second query or a final sort.
+    const root = document.querySelector('main') || document.body;
+    if (!root) return turns;
 
-    // Hydration fallback when the turn wrapper appears before its message subtree.
-    for (const wrapper of document.querySelectorAll(
+    for (const node of root.querySelectorAll(
       'section[data-turn], article[data-turn], ' +
       'section[data-testid^="conversation-turn-"], article[data-testid^="conversation-turn-"], ' +
-      '[data-testid^="conversation-turn-"]'
+      '[data-testid^="conversation-turn-"], ' +
+      '[data-message-author-role="user"], [data-message-author-role="assistant"]'
     )) {
+      const role = node.getAttribute?.('data-message-author-role');
+      const wrapper = role === 'user' || role === 'assistant'
+        ? (node.closest?.(
+          'section[data-turn], article[data-turn], ' +
+          'section[data-testid^="conversation-turn-"], article[data-testid^="conversation-turn-"], ' +
+          '[data-testid^="conversation-turn-"]'
+        ) || node)
+        : node;
       add(wrapper);
     }
 
-    return turns.sort((a, b) => {
-      if (a === b) return 0;
-      const relation = a.compareDocumentPosition(b);
-      if (relation & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
-      if (relation & Node.DOCUMENT_POSITION_PRECEDING) return 1;
-      return 0;
-    });
+    return turns;
   }
 
   function getTurnId(turn) {
@@ -2923,41 +2960,89 @@
     return cleanTurnText(node.textContent);
   }
 
-  function assistantTextCandidates(turn) {
-    if (!turn || turnRole(turn) !== 'assistant') return [];
-
-    const message = turn.matches?.('[data-message-author-role="assistant"]')
-      ? turn
-      : (turn.querySelector?.('[data-message-author-role="assistant"]') || turn);
-    const candidates = [];
-    const seen = new Set();
-
-    const add = value => {
-      const cleaned = cleanTurnText(value);
-      if (!cleaned || seen.has(cleaned)) return;
-      seen.add(cleaned);
-      candidates.push(cleaned);
-    };
-
-    // Authored answer surfaces first. ChatGPT can render a final answer as ordinary
-    // markdown, a code/pre block, a writing block, or a mixture of those.
-    for (const surface of message.querySelectorAll(
-      '.markdown.prose, .markdown[class*="prose"], .markdown, ' +
-      'pre, [data-writing-block="true"], [data-testid="writing-block-container"]'
-    )) {
-      add(readableNodeText(surface));
-      add(surface.textContent);
-    }
-
-    // Robust fallbacks. These intentionally happen after authored surfaces so UI
-    // chrome never masks a good answer, but can still rescue us after DOM changes.
-    add(readableNodeText(message));
-    add(message.textContent);
-    add(readableNodeText(turn));
-    add(turn.textContent);
-
-    return candidates.slice(0, 16);
+  // One bounded snapshot of an assistant turn per evaluation. The gate input,
+// the fallback whole-message candidates and the fingerprint all derive from
+// this single extraction pass, so a stabilization evaluation never re-reads
+// the same rendered answer a second time. The candidate bound (16) is applied
+// DURING collection: surfaces beyond it would be sliced off anyway, so their
+// text is never materialized.
+function buildAssistantSnapshot(turn) {
+  if (!turn || turnRole(turn) !== 'assistant') {
+    return { candidates: [], whole: [], fingerprint: '', sourceCount: 0 };
   }
+
+  const message = turn.matches?.('[data-message-author-role="assistant"]')
+    ? turn
+    : (turn.querySelector?.('[data-message-author-role="assistant"]') || turn);
+  const candidates = [];
+  const seen = new Set();
+  const whole = [];
+
+  const add = value => {
+    const cleaned = cleanTurnText(value);
+    if (!cleaned || seen.has(cleaned)) return;
+    seen.add(cleaned);
+    candidates.push(cleaned);
+  };
+
+  const addWhole = value => {
+    const cleaned = cleanTurnText(value);
+    if (cleaned && !whole.includes(cleaned)) whole.push(cleaned);
+  };
+
+  // Authored answer surfaces first. ChatGPT can render a final answer as ordinary
+  // markdown, a code/pre block, a writing block, or a mixture of those.
+  for (const surface of message.querySelectorAll(
+    '.markdown.prose, .markdown[class*="prose"], .markdown, ' +
+    'pre, [data-writing-block="true"], [data-testid="writing-block-container"]'
+  )) {
+    add(readableNodeText(surface));
+    if (candidates.length >= 16) break;
+    add(surface.textContent);
+    if (candidates.length >= 16) break;
+  }
+
+  // Robust fallbacks. These intentionally happen after authored surfaces so UI
+  // chrome never masks a good answer, but can still rescue us after DOM changes.
+  if (candidates.length < 16) add(readableNodeText(message));
+  if (candidates.length < 16) add(message.textContent);
+  if (candidates.length < 16) add(readableNodeText(turn));
+  if (candidates.length < 16) add(turn.textContent);
+
+  // Whole-message candidates stay unbounded: they are the authoritative gate
+  // input (real header plus all tickets), not bounded surface evidence.
+  addWhole(readableNodeText(message));
+  addWhole(message.textContent);
+  addWhole(readableNodeText(turn));
+  addWhole(turn.textContent);
+
+  // Incremental FNV-1a over candidate boundaries: identical to hashing the
+  // joined string, without materializing a combined copy of the answer.
+  let hash = 2166136261;
+  let length = 0;
+  const feed = value => {
+    const text = String(value || '');
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    length += text.length;
+  };
+  for (let index = 0; index < candidates.length; index += 1) {
+    if (index) {
+      feed('\n\n---ACB-SURFACE---\n\n');
+      length += 20;
+    }
+    feed(candidates[index]);
+  }
+  const fingerprint = `${length}:${(hash >>> 0).toString(36)}`;
+
+  return { candidates, whole, fingerprint, sourceCount: candidates.length };
+}
+
+function assistantTextCandidates(turn) {
+  return buildAssistantSnapshot(turn).candidates;
+}
 
   function getTurnText(turn) {
     if (!turn) return '';
@@ -3094,12 +3179,11 @@
     return `${value.length}:${(hash >>> 0).toString(36)}`;
   }
 
-  function assistantFingerprint(turn) {
+  function assistantFingerprint(turn, snapshot = null) {
     if (!turn) return '';
-    const text = turnRole(turn) === 'assistant'
-      ? assistantTextCandidates(turn).join('\n\n---ACB-SURFACE---\n\n')
-      : getTurnText(turn);
-    return `${getTurnId(turn)}:${textFingerprint(text)}`;
+    if (turnRole(turn) !== 'assistant') return `${getTurnId(turn)}:${textFingerprint(getTurnText(turn))}`;
+    const built = snapshot || buildAssistantSnapshot(turn);
+    return `${getTurnId(turn)}:${built.fingerprint}`;
   }
 
   function chatGPTIsGenerating() {
@@ -3638,23 +3722,12 @@
     return 'unknown';
   }
 
-  function responseGateFromAssistantTurn(stage, turn) {
+  function responseGateFromAssistantTurn(stage, turn, snapshot = null) {
     if (!turn) return { state: 'unknown', text: '', sourceCount: 0 };
 
-    const candidates = assistantTextCandidates(turn);
-    const wholeMessageCandidates = [];
-    const message = turn.matches?.('[data-message-author-role="assistant"]')
-      ? turn
-      : (turn.querySelector?.('[data-message-author-role="assistant"]') || turn);
-
-    const addWhole = value => {
-      const cleaned = cleanTurnText(value);
-      if (cleaned && !wholeMessageCandidates.includes(cleaned)) wholeMessageCandidates.push(cleaned);
-    };
-    addWhole(readableNodeText(message));
-    addWhole(message.textContent);
-    addWhole(readableNodeText(turn));
-    addWhole(turn.textContent);
+    const built = snapshot || buildAssistantSnapshot(turn);
+    const candidates = built.candidates;
+    const wholeMessageCandidates = built.whole;
 
     // Whole authored answer is authoritative. It contains the real header plus all
     // tickets; nested code/pre snippets are evidence, not independent handoffs.
@@ -3678,7 +3751,7 @@
     const combinedState = concreteHandoffState(stage, combined, auditGateSpec(stage));
     return {
       state: combinedState,
-      text: combined || getTurnText(turn),
+      text: combined || candidates[0] || '',
       sourceCount: candidates.length
     };
   }
@@ -3826,6 +3899,7 @@
     autoRuntime.waitStartedAt = 0;
     autoRuntime.stableResponseKey = '';
     autoRuntime.stableSince = 0;
+    ensureAutoAuditObserver();
     const persisted = saveAutoRuntime({ pauseOnFailure: false });
     setStatus(
       persisted ? `Auto audit paused: ${reason}` : `Auto audit paused in memory but could not persist the pause: ${reason}`,
@@ -3846,6 +3920,7 @@
     autoRuntime.conversationKey = autoBoundConversationKey || currentConversationKey();
     autoRuntime.seenUserId = getTurnId(latestUser);
     autoRuntime.baselineAssistantKey = assistantFingerprint(latestAssistant);
+    ensureAutoAuditObserver();
     if (!saveAutoRuntime()) return false;
 
     if (enabled) claimAutoLease();
@@ -3893,8 +3968,11 @@
     if (assistantNeedsContinuation(turn)) return { complete: false, reason: 'continue-generating' };
     if (assistantHasRetryError(turn)) return { complete: false, reason: 'retry-error' };
 
-    const gate = responseGateFromAssistantTurn(stage, turn);
-    const text = gate.text || getTurnText(turn);
+    // One bounded extraction pass feeds the gate, the fallback text and the
+    // fingerprint, so a stabilization evaluation never re-reads the answer.
+    const snapshot = buildAssistantSnapshot(turn);
+    const gate = responseGateFromAssistantTurn(stage, turn, snapshot);
+    const text = gate.text || snapshot.candidates[0] || '';
     if (!text) return { complete: false, reason: 'empty' };
 
     // Response-action buttons are useful but not authoritative after reload:
@@ -3906,7 +3984,7 @@
       return { complete: false, reason: 'no-finality-evidence' };
     }
 
-    const key = assistantFingerprint(turn);
+    const key = assistantFingerprint(turn, snapshot);
     const now = Date.now();
 
     if (autoRuntime.stableResponseKey !== key) {
@@ -4995,46 +5073,81 @@
     return resumed;
   }
 
-  function ensureAutoAuditObserver() {
-    if (detectSite().key !== 'chatgpt') return;
-    const root = document.querySelector('main') || document.body;
-    if (!root) return;
+  // The MutationObserver is the automation's eyes on the live DOM. Its payload
+// is scaled to what the current state actually needs, because token streaming
+// is the most mutation-heavy surface on a ChatGPT page:
+//   'stream' - enabled, waiting for or sending a wave: full subtree watching
+//              including characterData, so streamed text progress is seen;
+//   'turns'  - enabled, idle/complete/paused: childList only (no characterData
+//              flood); new turn insertions and root replacements still seen;
+//   'nav'    - disabled: childList only, binding/root tracking, no scheduling.
+// Config transitions (disable, pause, complete, wave send, root replacement)
+// recreate the observer so the heavy config never outlives the state that
+// needs it.
+function autoAuditObserverConfig() {
+  if (detectSite().key !== 'chatgpt') return null;
+  if (!autoRuntime?.enabled) return 'nav';
+  return ['wait-core', 'wait-second', 'wait-performance',
+    'sending-second', 'sending-performance', 'sending-continuation',
+    'await-second-user', 'await-performance-user', 'await-continuation-user'
+  ].includes(autoRuntime.stage)
+    ? 'stream'
+    : 'turns';
+}
 
-    const wasBound = Boolean(autoAuditObserver && autoAuditObserverRoot);
-    if (wasBound && autoAuditObserverRoot === root && autoAuditObserverRoot.isConnected) return;
-
-    if (autoAuditObserver) autoAuditObserver.disconnect();
-    autoAuditObserver = null;
-    autoAuditObserverRoot = root;
-
-    autoAuditObserver = new MutationObserver(() => {
-      // The observed root can be replaced or detached between mutations;
-      // always re-anchor before processing so a live observer never dies.
-      ensureAutoAuditObserver();
-      const previousKey = autoBoundConversationKey;
-      bindAutoRuntimeToCurrentConversation({ claim: false });
-
-      if (previousKey !== autoBoundConversationKey) {
-        renderAutoAuditState();
-      }
-
-      if (autoRuntime?.enabled) {
-        scheduleAutoAuditCheck(AUTO_OBSERVER_DEBOUNCE_MS);
-      }
-    });
-    autoAuditObserver.observe(root, {
-      childList: true,
-      subtree: true,
-      characterData: true
-    });
-
-    // Exactly one evaluation after a re-bind: mutations that happened while
-    // the observer was detached were not seen, so re-sync the chain once
-    // against the live conversation.
-    if (wasBound && autoRuntime?.enabled) {
-      evaluateAutoAudit().catch(error => pauseAutoAudit(`Monitor re-bind failed: ${error?.message || 'unexpected runtime error'}.`));
+function ensureAutoAuditObserver() {
+  const config = autoAuditObserverConfig();
+  if (!config) {
+    if (autoAuditObserver) {
+      autoAuditObserver.disconnect();
+      autoAuditObserver = null;
     }
+    autoAuditObserverRoot = null;
+    autoAuditObservedConfig = null;
+    return;
   }
+
+  const root = document.querySelector('main') || document.body;
+  if (!root) return;
+
+  const wasBound = Boolean(autoAuditObserver && autoAuditObserverRoot);
+  const rootChanged = wasBound && autoAuditObserverRoot !== root;
+  if (wasBound && !rootChanged && autoAuditObserverRoot.isConnected && autoAuditObservedConfig === config) return;
+
+  if (autoAuditObserver) autoAuditObserver.disconnect();
+  autoAuditObserver = null;
+  autoAuditObserverRoot = root;
+  autoAuditObservedConfig = config;
+
+  autoAuditObserver = new MutationObserver(() => {
+    // The observed root can be replaced or detached between mutations;
+    // always re-anchor before processing so a live observer never dies.
+    ensureAutoAuditObserver();
+    const previousKey = autoBoundConversationKey;
+    bindAutoRuntimeToCurrentConversation({ claim: false });
+
+    if (previousKey !== autoBoundConversationKey) {
+      renderAutoAuditState();
+    }
+
+    if (autoRuntime?.enabled) {
+      scheduleAutoAuditCheck(AUTO_OBSERVER_DEBOUNCE_MS);
+    }
+  });
+  autoAuditObserver.observe(root, {
+    childList: true,
+    subtree: true,
+    characterData: config === 'stream'
+  });
+
+  // Exactly one evaluation after a re-bind on a NEW root: mutations that
+  // happened while the observer was detached were not seen, so re-sync the
+  // chain once against the live conversation. Config-only transitions skip
+  // the evaluation because the in-memory stage already moved.
+  if (rootChanged && autoRuntime?.enabled) {
+    evaluateAutoAudit().catch(error => pauseAutoAudit(`Monitor re-bind failed: ${error?.message || 'unexpected runtime error'}.`));
+  }
+}
 
   function startAutoAuditMonitor(options = {}) {
     if (detectSite().key !== 'chatgpt') {
@@ -5094,6 +5207,7 @@
     if (!next) {
       clearAutoTimers();
       releaseAutoLease(autoBoundConversationKey);
+      ensureAutoAuditObserver();
       setStatus('Auto 3 waves disabled for this chat only. Saved progress is preserved; other and future conversations are unaffected.', 'success');
       renderAutoAuditState();
       return;
@@ -5653,6 +5767,11 @@
       if (!drag) return;
       if (event?.pointerId != null && event.pointerId !== drag.pointerId) return;
 
+      if (dragFrame) {
+        cancelAnimationFrame(dragFrame);
+        dragFrame = 0;
+      }
+
       const pointerId = drag.pointerId;
       drag = null;
 
@@ -5683,12 +5802,26 @@
       const visiblePosition = clampPanelPosition();
       if (!visiblePosition) return;
 
+      // Cache the viewport bounds and rendered panel size once at drag start.
+      // Pointer-move frames then compute the clamped position from this cached
+      // geometry instead of re-running the whole display-layout sync (which
+      // rewrites width/height/opacity and forces a layout read) per raw event.
+      const viewport = visiblePosition.viewport;
+      const marginX = Math.min(PANEL_EDGE_MARGIN, Math.max(0, (viewport.width - visiblePosition.width) / 2));
+      const marginY = Math.min(PANEL_EDGE_MARGIN, Math.max(0, (viewport.height - visiblePosition.height) / 2));
+      const minX = viewport.left + marginX;
+      const minY = viewport.top + marginY;
+
       drag = {
         pointerId: event.pointerId,
         startX: event.clientX,
         startY: event.clientY,
         originX: visiblePosition.x,
-        originY: visiblePosition.y
+        originY: visiblePosition.y,
+        minX,
+        minY,
+        maxX: Math.max(minX, viewport.right - visiblePosition.width - marginX),
+        maxY: Math.max(minY, viewport.bottom - visiblePosition.height - marginY)
       };
 
       try { titlebar.setPointerCapture(event.pointerId); } catch (_) { }
@@ -5700,7 +5833,19 @@
 
       state.popupPos.x = drag.originX + (event.clientX - drag.startX);
       state.popupPos.y = drag.originY + (event.clientY - drag.startY);
-      clampPanelPosition();
+
+      // At most one geometry-free position update per animation frame; the
+      // latest pointer coordinates win, redundant high-rate moves are dropped.
+      if (!dragFrame) {
+        dragFrame = requestAnimationFrame(() => {
+          dragFrame = 0;
+          if (!drag) return;
+          const x = clampNumber(state.popupPos.x, drag.minX, drag.maxX);
+          const y = clampNumber(state.popupPos.y, drag.minY, drag.maxY);
+          panel.style.setProperty('left', `${x}px`, 'important');
+          panel.style.setProperty('top', `${y}px`, 'important');
+        });
+      }
 
       if (event.cancelable) event.preventDefault();
     }, { passive: false });
@@ -6012,6 +6157,9 @@
         get autoInstanceId() { return autoInstanceId; },
         classifyAuditMessage,
         classifyAuditTurn,
+        buildAssistantSnapshot,
+        completedAssistantCandidate,
+        setAutoAuditEnabled,
         findAssistantRecoveryControl,
         isAuthoredAssistantContent,
         assistantNeedsContinuation,
@@ -6055,6 +6203,8 @@
         currentConversationKey,
         detectSite,
         ensureAutoAuditObserver,
+        autoAuditObserverConfig,
+        mount,
         startAutoAuditMonitor,
         stopAutoAuditMonitor,
         triggerSend,

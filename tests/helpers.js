@@ -1,6 +1,6 @@
 'use strict';
 
-const { createHarness } = require('./harness');
+const { createHarness, FakeEvent } = require('./harness');
 
 function setup() {
   const h = createHarness();
@@ -103,4 +103,4 @@ function runtimeFixture(overrides = {}) {
   };
 }
 
-module.exports = { setup, mainEl, userTurn, assistantTurn, addTurns, composerFixture, leaseFor, runtimeFixture };
+module.exports = { setup, mainEl, userTurn, assistantTurn, addTurns, composerFixture, leaseFor, runtimeFixture, FakeEvent };

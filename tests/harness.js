@@ -10,6 +10,15 @@ const AUTO_DRAFT_SESSION_KEY = 'ai_chatbuttons_auto_draft_id_v1';
 
 let uuidCounter = 0;
 
+const counters = {
+  rectReads: 0,
+  cdp: 0,
+  qsa: 0,
+  innerTextReads: 0,
+  gmGet: 0,
+  gmSet: 0
+};
+
 function nextUuid() {
   uuidCounter += 1;
   return `00000000-0000-4000-8000-${String(uuidCounter).padStart(12, '0')}`;
@@ -280,7 +289,7 @@ class FakeElement {
     this._text = String(value == null ? '' : value);
   }
 
-  get innerText() { return this.textContent; }
+  get innerText() { counters.innerTextReads += 1; return this.textContent; }
   set innerText(value) { this.textContent = value; }
 
   get innerHTML() { return ''; }
@@ -379,6 +388,7 @@ class FakeElement {
     return false;
   }
   getBoundingClientRect() {
+    counters.rectReads += 1;
     if (this.hidden || this.getAttribute('hidden') !== null) return { width: 0, height: 0, top: 0, left: 0, bottom: 0, right: 0 };
     return { width: 1, height: 1, top: 0, left: 0, bottom: 1, right: 1 };
   }
@@ -394,6 +404,7 @@ class FakeElement {
     return null;
   }
   querySelectorAll(selector) {
+    counters.qsa += 1;
     const out = [];
     const walk = node => {
       for (const child of node.children) {
@@ -409,6 +420,7 @@ class FakeElement {
     return out[0] || null;
   }
   compareDocumentPosition(other) {
+    counters.cdp += 1;
     const order = this._documentOrder();
     const a = order.get(this);
     const b = order.get(other);
@@ -461,6 +473,11 @@ class FakeEvent {
     this.inputType = init.inputType ?? '';
     this.checked = init.checked ?? false;
     this.value = init.value ?? '';
+    this.clientX = init.clientX ?? 0;
+    this.clientY = init.clientY ?? 0;
+    this.pointerId = init.pointerId ?? 0;
+    this.isPrimary = init.isPrimary ?? false;
+    this.button = init.button ?? 0;
   }
   preventDefault() { this.defaultPrevented = true; }
 }
@@ -479,6 +496,7 @@ class FakeDocument {
     this.body.appendChild(this._main);
   }
   querySelectorAll(selector) {
+    counters.qsa += 1;
     return this.documentElement.querySelectorAll(selector);
   }
   querySelector(selector) {
@@ -597,6 +615,7 @@ class FakeTimers {
 // ---------------------------------------------------------------------------
 
 function createHarness() {
+  Object.assign(counters, { rectReads: 0, cdp: 0, qsa: 0, innerTextReads: 0, gmGet: 0, gmSet: 0 });
   const timers = new FakeTimers();
   const gmStore = new Map();
   const sessionStore = new Map();
@@ -605,12 +624,27 @@ function createHarness() {
 
   const document = new FakeDocument(null);
   const location = { hostname: 'chatgpt.com', host: 'chatgpt.com', href: 'https://chatgpt.com/c/abc123', pathname: '/c/abc123', search: '', protocol: 'https:' };
-  const harness = { timers, gmStore, sessionStore, localStore, _observers: observers, api: null, dom: document, location };
-  document._harness = harness;
 
   const windowObj = {
-    addEventListener() {},
-    removeEventListener() {},
+    _listeners: new Map(),
+    addEventListener(type, fn) {
+      if (!this._listeners.has(type)) this._listeners.set(type, new Set());
+      this._listeners.get(type).add(fn);
+    },
+    removeEventListener(type, fn) {
+      this._listeners.get(type)?.delete(fn);
+    },
+    dispatchEvent(event) {
+      event.target = event.target || this;
+      event.currentTarget = this;
+      const listeners = this._listeners.get(event.type);
+      if (listeners) for (const fn of Array.from(listeners)) fn.call(this, event);
+      return !event.defaultPrevented;
+    },
+    innerWidth: 800,
+    innerHeight: 600,
+    devicePixelRatio: 1,
+    visualViewport: undefined,
     getSelection: () => null,
     getComputedStyle: () => ({ display: 'block', visibility: 'visible' }),
     matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }),
@@ -639,6 +673,9 @@ function createHarness() {
     requestAnimationFrame: fn => timers.setTimeout(fn, 16),
     cancelAnimationFrame: id => timers.clearTimeout(id)
   };
+
+  const harness = { timers, gmStore, sessionStore, localStore, _observers: observers, api: null, dom: document, location, counters, window: windowObj };
+  document._harness = harness;
 
   const sandbox = {
     console,
@@ -675,8 +712,8 @@ function createHarness() {
       observer._harness = harness;
       return observer;
     },
-    GM_getValue: (key, def) => (gmStore.has(key) ? gmStore.get(key) : def),
-    GM_setValue: (key, value) => { gmStore.set(key, value); },
+    GM_getValue: (key, def) => { counters.gmGet += 1; return gmStore.has(key) ? gmStore.get(key) : def; },
+    GM_setValue: (key, value) => { counters.gmSet += 1; gmStore.set(key, value); },
     GM_deleteValue: key => { gmStore.delete(key); },
     GM_addStyle: () => {},
     GM_registerMenuCommand: () => 0,
@@ -742,4 +779,4 @@ harness.settle = async () => {
   return harness;
 }
 
-module.exports = { createHarness, FakeElement, matchesSelector, parseAttrToken, matchCompound };
+module.exports = { createHarness, FakeElement, FakeEvent, matchesSelector, parseAttrToken, matchCompound };

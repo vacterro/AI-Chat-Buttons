@@ -12,3 +12,4 @@
 - 20.08.26 00:00 [E-012] [SHIP] RUN: commit ba5adeb pushed to origin/master (v0.0.16, W2-001..007 + tests 63/63). STATE next_action -> review/next ticket
 - 20.08.26 00:00 [E-013] [HUNT] RUN: full sweep (6 signals, explicit hh) -> 2 findings: T-011 README stale version 0.0.1 vs 0.0.16; T-012 tests/smoke.js orphan debug probe. Tests 63/63 + node --check clean
 - 20.08.26 00:00 [E-014] [T-011,T-012] RUN: T-011 README version -> 0.0.16 (badge + section, verified); T-012 smoke.js deleted per user, suite 63/63 green. hunt findings closed
+- 20.08.26 00:00 [E-015] [PERF-001..005] RUN: performance wave implemented: rAF-bounded drag (0 layout reads during moves), state-gated observer config (nav/turns/stream), idempotent lease claim (nonce-stable renewal, fresh re-acquire on expiry), one-pass scoped turn discovery, single bounded assistant extraction per evaluation (16-surface cap). 5 instrumentation suites added (23 tests). Full regression 86/86 green + node --check clean.
