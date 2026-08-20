@@ -9,3 +9,4 @@
 - 18.08.26 02:30 [E-008] [HUNT] RUN: hunt sweep (6 signals) -> 1 finding: duplicate userscript entry (AICHATBUTTONS.js vs ai_chatbuttons.js). Ticket T-010.
 - 18.08.26 02:30 [E-009] [HUNT] DEC: STATE -> PLAN (findings logged, awaiting fix decision).- 20.08.26 00:00 [E-010] [T-010] DEC: T-010 resolved via ai_chatbuttons.js deletion; .saipen refreshed from stale v0.0.1/HUNT world to live v0.0.15 W2 repair wave; cc = continue work
 - 20.08.26 00:00 [E-011] [W2] RUN: W2-001..W2-007 all repaired+tested. 63/63 regression tests pass, node --check clean. OpenCodeConfigFixer.ps1 patcher verified idempotent. STATE/BOARD updated; commit+push pending
+- 20.08.26 00:00 [E-012] [SHIP] RUN: commit ba5adeb pushed to origin/master (v0.0.16, W2-001..007 + tests 63/63). STATE next_action -> review/next ticket
