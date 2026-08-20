@@ -3,6 +3,8 @@
 ## DOING
 
 ## TODO
+- [x] T-011 README: stale version 0.0.1 in badge + install section — fixed to 0.0.16
+- [x] T-012 tests/smoke.js: orphan debug probe — deleted per user decision
 
 ## DONE
 - [x] W2-001 Lease fencing: nonce token carried through async sends; takeover reloads persisted runtime

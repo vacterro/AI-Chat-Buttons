@@ -1,12 +1,12 @@
 # AI Chat Buttons
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-0.0.1-green.svg)
+![Version](https://img.shields.io/badge/version-0.0.16-green.svg)
 
 Universal AI prompt buttons for web-based AI chat interfaces. Provides customizable prompt buttons across multiple AI platforms.
 
 ## Version
-0.0.1
+0.0.16
 
 ## Supported Platforms
 - OpenAI (ChatGPT)
