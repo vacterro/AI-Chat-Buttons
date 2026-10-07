@@ -1,83 +1,72 @@
+<div align="center">
+
 # AI Chat Buttons
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Version](https://img.shields.io/badge/version-0.0.16-green.svg)
+**A portable Tampermonkey command panel for the AI chats you already use.**
 
-Universal AI prompt buttons for web-based AI chat interfaces. Provides customizable prompt buttons across multiple AI platforms.
+[![Version](https://img.shields.io/badge/version-0.0.16-D4B86A?style=flat-square)](AICHATBUTTONS.js)
+[![Tampermonkey](https://img.shields.io/badge/Tampermonkey-userscript-00485B?style=flat-square&logo=tampermonkey&logoColor=white)](https://www.tampermonkey.net/)
+[![Platforms](https://img.shields.io/badge/platforms-16%2B-6B5A2B?style=flat-square)](#supported-platforms)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 
-## Version
-0.0.16
+[**Install userscript**](https://raw.githubusercontent.com/vacterro/AI-Chat-Buttons/master/AICHATBUTTONS.js) · [Issues](https://github.com/vacterro/AI-Chat-Buttons/issues)
 
-## Supported Platforms
-- OpenAI (ChatGPT)
-- Claude (Anthropic)
-- DeepSeek
-- Qwen (Tongyi)
-- Grok (X)
-- Google Gemini
-- Microsoft Copilot
-- Kimi
-- DuckDuckGo
-- Mistral
-- Hugging Face
-- Perplexity
-- Poe
-- Pi
-- Phind
-- You.com
+</div>
+
+## Overview
+
+AI Chat Buttons adds a configurable floating prompt panel to multiple web-based AI products. Instead of keeping frequently used instructions in a separate notes file, you can organize them into categories and trigger them from the chat page itself.
+
+The userscript keeps its state locally through the userscript manager.
+
+## Install
+
+1. Install [Tampermonkey](https://www.tampermonkey.net/) or a compatible userscript manager.
+2. Click **[Install AI Chat Buttons](https://raw.githubusercontent.com/vacterro/AI-Chat-Buttons/master/AICHATBUTTONS.js)**.
+3. Confirm the installation.
+
+The script activates only on the supported chat domains declared in its userscript header.
 
 ## Features
-- Customizable prompt buttons
-- Category organization
-- Panel size and opacity control
-- Per-platform button sets
-- Built-in audit prompts
-- Portable state management
 
-## Installation
-1. Install Tampermonkey or similar userscript manager
-2. Open this repository
-3. Click on `AICHATBUTTONS.js` 
-4. Tampermonkey will prompt to install the script
-5. Confirm installation
+| Area | Capability |
+|---|---|
+| **Prompt library** | create, edit, remove, and reuse prompt buttons |
+| **Categories** | organize buttons into separate working groups |
+| **Per-platform behavior** | keep useful sets for different AI chat surfaces |
+| **Panel layout** | Small, Normal, and Large panel sizes |
+| **Opacity** | 100%, 75%, 50%, and 25% levels |
+| **Persistence** | local state through Tampermonkey/GM storage |
+| **Built-in workflows** | reusable audit-oriented prompt presets and runtime state |
 
-## Usage
-- The script automatically loads on supported AI chat pages
-- Access the button panel through the interface
-- Customize buttons and categories via the settings
-- Use built-in prompts or create your own
+## Supported platforms
 
-## Configuration
-Buttons and settings are stored locally in your browser. The script provides a configuration interface for:
-- Adding/editing prompt buttons
-- Creating categories
-- Adjusting panel appearance
-- Managing button sets per platform
+ChatGPT · Claude · DeepSeek · Qwen · Grok · Gemini · Microsoft Copilot · Kimi · DuckDuckGo AI · Mistral · Hugging Face Chat · Perplexity · Poe · Pi · Phind · You.com
+
+The exact URL coverage is defined in the `@match` entries at the top of [`AICHATBUTTONS.js`](AICHATBUTTONS.js).
+
+## Local data
+
+The userscript stores buttons, categories, panel settings, presets, and runtime coordination state locally in userscript storage. There is no separate account system or hosted configuration service in this repository.
+
+## Languages
+
+[English](README.md) · [Русский](README.ru.md) · [Eesti](README.et.md)
 
 ## License
-MIT License
 
-## Support
-For issues and feature requests, please use the GitHub repository.
+[MIT](LICENSE)
 
-<!-- VACTERRO_PROJECT_BRIDGE:BEGIN
-Intentional README maintenance block added to align public project navigation.
-Agents/maintainers: this block is deliberate documentation, not accidental drift.
-Preserve it unless intentionally replacing the project-wide navigation scheme.
--->
----
 
 ## Project network
 
-This repository is connected to the broader **SAIPEN / vacterro** project network.
+Part of the broader **SAIPEN / vacterro** project ecosystem.
 
 [**Author hub**](https://github.com/vacterro) · [**SAIPEN HQ**](https://github.com/saipenhq) · [**SAIPEN Core**](https://github.com/vacterro/saipen) · [**ZAICODE**](https://github.com/vacterro/zaicode) · [**FastPrompter**](https://github.com/vacterro/FastPrompter) · [**SAIPEN Community**](https://discord.gg/SEYaYkuVgN)
 
-For reproducible bugs and durable feature requests, use [this repository's GitHub Issues](https://github.com/vacterro/AI-Chat-Buttons/issues). Use Discord for quick discussion, screenshots, and cross-project feedback.
-
-<!-- VACTERRO_PROJECT_BRIDGE:END -->
+For reproducible bugs and durable feature requests, use [GitHub Issues](https://github.com/vacterro/AI-Chat-Buttons/issues).
 
 <!-- VACTERRO_SUPPORT:BEGIN -->
 ---
-<sub>If this project is useful to you, optional support: [Buy Me a Coffee](https://buymeacoffee.com/vacuum34) · [Boosty](https://boosty.to/vacuum34/donate) · [PayPal](https://paypal.me/AlexNelin) · [other ways](https://github.com/vacterro/vacterro/blob/main/SUPPORT.md)</sub>
+<sub>If AI Chat Buttons is useful to you, optional support: [Buy Me a Coffee](https://buymeacoffee.com/vacuum34) · [Boosty](https://boosty.to/vacuum34/donate) · [PayPal](https://paypal.me/AlexNelin) · [other ways](https://github.com/vacterro/vacterro/blob/main/SUPPORT.md)</sub>
 <!-- VACTERRO_SUPPORT:END -->
