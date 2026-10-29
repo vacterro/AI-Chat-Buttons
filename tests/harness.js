@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const SCRIPT_PATH = path.join(__dirname, '..', 'AICHATBUTTONS.js');
+const SCRIPT_PATH = process.env.ACB_SOURCE_SUBJECT || path.join(__dirname, '..', 'AICHATBUTTONS.js');
 const AUTO_TAB_SESSION_KEY = 'ai_chatbuttons_auto_tab_id_v1';
 const AUTO_DRAFT_SESSION_KEY = 'ai_chatbuttons_auto_draft_id_v1';
 
@@ -768,9 +768,9 @@ harness.settle = async () => {
 
   harness.advance = ms => timers.advance(ms);
 
-  harness.mutate = root => {
+  harness.mutate = (root, records = [{ type: 'childList', target: root, addedNodes: [], removedNodes: [] }]) => {
     for (const observer of Array.from(observers)) {
-      if (observer.connected && observer.root === root) observer.callback([], observer);
+      if (observer.connected && observer.root === root) observer.callback(records, observer);
     }
   };
 

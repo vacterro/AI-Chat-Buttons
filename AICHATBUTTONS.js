@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI ChatButtons
 // @namespace    https://github.com/local/ai-chatbuttons
-// @version      0.0.16
+// @version      0.0.56
 // @description  Universal AI prompt buttons — SAIPEN Golden Default UI
 // @author       AI ChatButtons
 // @match        https://chat.openai.com/*
@@ -32,6 +32,12 @@
 // @grant        GM_getValue
 // @grant        GM_deleteValue
 // @grant        GM_addStyle
+// @grant        GM_setClipboard
+// @grant        GM_xmlhttpRequest
+// @grant        GM_listValues
+// @grant        GM_addValueChangeListener
+// @connect      127.0.0.1
+// @connect      localhost
 // @run-at       document-start
 // ==/UserScript==
 
@@ -39,12 +45,14 @@
   'use strict';
 
   const STORAGE_KEY = 'ai_chatbuttons_v6';
-  const STATE_VERSION = 8;
+  const STATE_VERSION = 35;
   const BUILTIN_REVISION = 8;
   const MAX_CATEGORIES = 10;
   const MAX_PRESETS = 20;
   const PANEL_WIDTH = 400;
   const PANEL_HEIGHT = 510;
+  const SUPER_COMPACT_WIDTH = 300;
+  const SUPER_COMPACT_HEIGHT = 28;
   const PANEL_SIZES = Object.freeze({
     compact: Object.freeze({ width: 340, height: 420, label: 'Small' }),
     normal: Object.freeze({ width: PANEL_WIDTH, height: PANEL_HEIGHT, label: 'Normal' }),
@@ -58,6 +66,20 @@
   const AUTO_LEGACY_SESSION_KEY = 'ai_chatbuttons_auto_audit_v1';
   const AUTO_TAB_SESSION_KEY = 'ai_chatbuttons_auto_tab_id_v1';
   const AUTO_DRAFT_SESSION_KEY = 'ai_chatbuttons_auto_draft_id_v1';
+  const AUTO_START_HANDOFF_SESSION_KEY = 'ai_chatbuttons_auto_start_handoff_v1';
+  const AUTO_START_PREPARE_TTL_MS = 600000;
+  const AUTO_START_SENT_TTL_MS = 300000;
+  const AUTO_START_ROUTE_COMMIT_WINDOW_MS = 20000;
+  const AUTO_START_HARD_NAV_BOOTSTRAP_MS = 120000;
+  const AUTO_AUTH_HOLD_RETRY_MS = 5000;
+  const AUTO_LAST_STABLE_CHAT_SESSION_KEY = 'ai_chatbuttons_last_stable_chat_v1';
+  const AUTO_A3_INTENT_SESSION_KEY = 'ai_chatbuttons_a3_intent_v1';
+  const AUTO_ROUTE_TRANSIENT_GRACE_MS = 30000;
+  const LOCAL_TITLE_REAPPLY_MIN_MS = 800;
+  const WIDGET_BOOTSTRAP_RETRY_DELAYS_MS = Object.freeze([0, 10, 25, 50, 100, 250, 500, 1000, 2000, 5000]);
+  const AUTO_START_RECOVERY_DELAYS_MS = Object.freeze([
+    120, 350, 800, 1600, 3000, 5000, 8000, 12000, 20000, 30000, 45000, 60000, 90000, 120000
+  ]);
   const AUTO_LEASE_TTL_MS = 30000;
   const AUTO_LEASE_RENEW_MS = 10000;
   const AUTO_LEASE_VERIFY_MS = 90;
@@ -65,16 +87,50 @@
   const AUTO_MAX_CONTINUE_GENERATING = 8;
   const AUTO_MAX_RETRIES = 3;
   const AUTO_MAX_STALL_NUDGES = 6;
+  const AUTO_MAX_SIDECAR_RECOVERIES = 8;
+  const AUTO_SIDECAR_RECOVERY_GRACE_MS = 6000;
   const AUTO_IDLE_STALL_GRACE_MS = 20000;
   const AUTO_LIVENESS_CHECK_MS = 2500;
+  const AUTO_EXECUTION_GAP_RESET_MS = 15000;
   const AUTO_STAGE_TIMEOUTS = Object.freeze([60, 120, 180, 360]);
   const AUTO_DELAYS_MS = Object.freeze([500, 1200, 2500, 5000, 10000]);
   const AUTO_RESPONSE_STABLE_MS = 1200;
   const AUTO_OBSERVER_DEBOUNCE_MS = 650;
-  const AUTO_SEND_REGISTER_TIMEOUT_MS = 20000;
-  const AUTO_SEND_REGISTER_RETRY_MS = 60000;
-  const AUTO_MAX_SEND_REGISTRATION_RETRIES = 2;
+  const AUTO_SEND_REGISTER_TIMEOUT_MS = 12000;
+  const AUTO_SEND_REGISTER_RETRY_MS = 15000;
+  const AUTO_SEND_REGISTER_HARD_TIMEOUT_MS = 120000;
+  const AUTO_MAX_SEND_REGISTRATION_RETRIES = 3;
+  const AUTO_COMPOSER_HOLD_FAST_DELAYS_MS = Object.freeze([250, 600, 1200, 2200, 3500, 5000, 5000, 5000]);
+  const AUTO_COMPOSER_HOLD_SAFETY_MS = 15000;
   const AUTO_SEND_RECEIPT_PREFIX = 'ACB_CHAIN_RECEIPT';
+  const AUTO_COMMITTED_SEND_SESSION_KEY = 'ai_chatbuttons_committed_send_v1';
+  const AUTO_COMMITTED_SEND_TTL_MS = 90000;
+  const AUTO_AUDIT_RESULT_PREFIX = 'ai_chatbuttons_audit_result_v1:';
+  const AUTO_AUDIT_RESULT_SIGNAL_KEY = 'ai_chatbuttons_audit_result_signal_v1';
+  const AUDIT_FS_DB_NAME = 'ai_chatbuttons_files_v1';
+  const AUDIT_FS_DB_VERSION = 1;
+  const AUDIT_FS_STORE = 'handles';
+  const AUDIT_FS_HANDLE_KEY = 'audit-output-directory';
+  const AUDIT_OUTPUT_HINT = 'V:\\___VAC\\__K\\__CODE\\_AI_STUFF_AGENTIC\\__TO_AUDIT\\AUDITING_IMPLEMENTATION\\';
+
+  const BRIDGE_DEFAULT_URL = 'http://127.0.0.1:17843';
+  const BRIDGE_TOKEN_KEY = 'ai_chatbuttons_bridge_token_v1';
+  const BRIDGE_JOB_PREFIX = 'ai_chatbuttons_bridge_job_v1:';
+  const BRIDGE_QUEUE_SIGNAL_KEY = 'ai_chatbuttons_bridge_queue_signal_v1';
+  const BRIDGE_FLUSH_LEASE_KEY = 'ai_chatbuttons_bridge_flush_lease_v1';
+  const BRIDGE_FLUSH_LEASE_MS = 30000;
+  const BRIDGE_REQUEST_TIMEOUT_MS = 12000;
+  const BRIDGE_RETRY_DELAYS_MS = Object.freeze([2000, 5000, 15000, 30000, 60000, 120000, 300000]);
+  const BRIDGE_API_VERSION = 1;
+
+  const CHAT_RENAME_MAX_ATTEMPTS = 7;
+  const CHAT_TITLE_GUARD_DELAYS_MS = Object.freeze([350, 1200, 4000, 15000, 60000, 300000]);
+  const CHAT_TITLE_GUARD_TTL_MS = 960000;
+  const CHAT_TITLE_VERIFY_DELAYS_MS = Object.freeze([160, 420, 900]);
+  const CHAT_RENAME_RATE_STATE_KEY = 'ai_chatbuttons_rename_rate_v2';
+  const CHAT_RENAME_GLOBAL_MIN_GAP_MS = 8000;
+  const CHAT_RENAME_CONVERSATION_MIN_GAP_MS = 12000;
+  const CHAT_RENAME_429_COOLDOWN_MS = 900000;
   const CHATGPT_LONG_PROMPT_THRESHOLD = 6000;
   const CHATGPT_ATTACHMENT_TIMEOUT_MS = 30000;
   const CHATGPT_PROMPT_DELIVERY_MODES = Object.freeze(['auto', 'file', 'text']);
@@ -84,11 +140,11 @@
     performance: 'AUDIT_PERFORMANCE.md'
   });
 
-  const AUDIT_CORE = "AUDIT CORE — deep read-only software correctness audit for implementation handoff.\n\nROLE\n\nYou are the AUDITOR, not the implementation agent.\n\nInspect the supplied project deeply, identify verified flaws, and return a high-value repair handoff for a separate implementation agent. Do not modify the audited implementation or project metadata during this pass.\n\nTARGET\n\nResolve the most recent explicit implementation target in the conversation: repository, archive, project tree, attached file, or pasted code.\n\nPrefer the newest explicit target when several exist.\n\nRepository: inspect the current supplied/default revision unless the user explicitly names another branch/commit.\nArchive: unpack fully and identify the real project root.\nSingle file: inspect the complete supplied file and directly relevant local contracts/dependencies when available.\n\nIf the target itself cannot actually be read, return BLOCKED with the exact missing artifact/access. Do not invent evidence.\n\nPROJECT ORIENTATION — FAST, READ-ONLY, NON-BLOCKING\n\nBefore the deep code audit, spend a small bounded setup pass understanding the project itself.\n\nAt the resolved project root, inspect these only when they exist:\n\n- `.saipen/`: root project STATE/BOARD/LOG plus only relevant KNOWLEDGE/kitchen material. Use it as optional historical/work-state context: prior fixes, known failures, active tasks, stale assumptions, baseline drift.\n- Git: use ordinary Git metadata/commands when available (HEAD, branch, status, useful recent history/diff). Do NOT crawl `.git/objects` or spend audit budget reading Git internals.\n- project manifests and lockfiles: package.json, Cargo.toml, pyproject.toml, requirements, go.mod, solution/project files, build config, etc.;\n- tests/fixtures, migrations, schemas, config, docs/contracts, CI/workflow files, scripts and entry points when relevant;\n- other project-local helper/state directories only when they materially explain runtime behavior.\n\nThese sources are ORIENTATION, not gates.\n\nRules:\n- `.saipen/`, Git, docs, tests, manifests, CI or helper folders may be absent. Continue normally.\n- Do not require an external SAIPEN installation, `saipen_home`, BOOT/CORE/MARKHUNT files, validator, portable protocol bundle, or any other out-of-project authority.\n- Do not initialize, repair, rebind, validate or modify `.saipen/`.\n- If `.saipen/` is stale, contradictory, incomplete, or references inaccessible external paths, record that briefly and continue.\n- Live implementation files are authoritative for current behavior.\n- Do not let project-management metadata consume the audit budget. The implementation is the primary target.\n\nBASELINE\n\nRecord the strongest truthful identity available:\n- Git: branch + current commit when readable;\n- archive: archive filename + hash/fingerprint when available;\n- file: filename + hash/fingerprint when available;\n- otherwise the clearest stable identity available.\n\nAUDIT METHOD\n\nBuild a compact map first:\n\nentry points -> parsing/validation -> state owners -> transitions -> core logic -> persistence/I/O -> recovery/error paths -> UI/output -> tests/contracts.\n\nThen follow real execution/data/state paths end-to-end. Audit correctness before style.\n\nHUNT VERIFIED ROOT DEFECTS\n\nPrioritize:\n- broken invariants and contradictory logic;\n- wrong defaults, branches, ordering or state transitions;\n- missing/incorrect validation and invalid partial-state handling;\n- duplicate/competing sources of truth;\n- duplicated implementations whose behavior can drift;\n- dead/unreachable/stale compatibility paths that still affect runtime;\n- partial migrations and config/schema/version drift;\n- persistence, serialization, import/export, restart, recovery and data-loss faults;\n- init/shutdown/teardown/ownership mistakes;\n- concurrency, repeated invocation, stale async result, retry, cancellation and idempotence faults where applicable;\n- UI state disagreeing with runtime state;\n- stale/replaced targets and incorrect fallback selection;\n- API/CLI/docs/config/tests contradicting actual execution;\n- tests that protect the wrong invariant or fail to cover a demonstrated failure.\n\nQUALITY BAR\n\n- Evidence before finding.\n- Root cause before symptom.\n- Merge symptoms sharing one root cause.\n- Preserve correct behavior.\n- No generic cleanup.\n- No speculative redesign.\n- No framework/dependency/telemetry/dashboard proposals unless required by a verified defect.\n- Never fabricate commands, output, test results, timings, paths, commits or reproduction evidence.\n- Use PARTIAL only when the wave genuinely cannot finish within the current execution/context budget. PARTIAL is a resumable machine checkpoint, not a request for user intervention; finish the current evidence cleanly and expect an automatic same-wave continuation.\n- Do not interact with external accounts, services, hosts, endpoints or infrastructure. Local/static project inspection and ordinary project tests are allowed when available and relevant.\n\nEFFICIENCY\n\nDo not read the project alphabetically and do not repeatedly rescan stable areas.\n\nSpend most analysis on state ownership, transitions, persistence, lifecycle, routing, recovery, user-visible behavior and code implicated by real execution paths.\n\nSkip generated/vendor/build/cache output unless runtime or evidence makes it relevant.\n\nPRIORITY\n\nP0 = data corruption/loss, severe local safety/security defect, crash/unusable primary flow, or fundamental correctness failure.\nP1 = significant functional defect, lifecycle/recovery/integration failure, or high-probability user-visible breakage.\nP2 = lower-impact but real defect, concrete maintainability drift likely to cause failure, or missing regression coverage for a verified issue.\n\nFINAL HANDOFF\n\nReturn ONE code block only. It must be directly usable by a separate implementation agent without needing the audit conversation.\n\nHeader exactly:\n\nPROJECT_NAME: <name>\nDATE_TIME: <current session/local date-time when available; otherwise UTC>\nWAVE: AUDIT CORE\nTARGET: <what artifact/project was actually inspected>\nBASELINE: <identity>\nGIT_CONTEXT: <PRESENT branch@commit | ABSENT | UNREADABLE> - <brief note>\nSAIPEN_CONTEXT: <PRESENT | ABSENT | STALE | UNREADABLE> - <brief useful note>\nAUDIT_SCOPE: <compact modules/areas actually inspected>\nSTATUS: AUDIT_CORE: <COMPLETE | PARTIAL | BLOCKED>\nTICKETS: <count>\nHANDOFF: IMPLEMENTATION_AGENT\n\nThen tickets in priority order. Each ticket must use:\n\n[P0|P1|P2] [CORE-001] <path/module/symbol>\nEVIDENCE: <specific code/path/behavior proving the issue>\nDEFECT: <root cause and concrete consequence>\nREPAIR: <smallest correct implementation change; name exact areas when established>\nVERIFY: <specific regression test/check that proves the repair without breaking correct behavior>\n\nUse CORE-001, CORE-002... only within this handoff. One root cause per ticket.\n\nIf no verified defects exist:\nTICKETS: 0\nNO VERIFIED CORE DEFECTS.\n\nEnd:\nCORE_DONE_WHEN: <compact explicit implementation + verification gate>\n\nNo prose outside the code block.";
+  const AUDIT_CORE = "AUDIT CORE — deep read-only software correctness audit for implementation handoff.\n\nROLE\n\nYou are the AUDITOR, not the implementation agent.\n\nInspect the supplied project deeply, identify verified flaws, and return a high-value repair handoff for a separate implementation agent. Do not modify the audited implementation or project metadata during this pass.\n\nTARGET\n\nResolve the most recent explicit implementation target in the conversation: repository, archive, project tree, attached file, or pasted code.\n\nPrefer the newest explicit target when several exist.\n\nRepository: inspect the current supplied/default revision unless the user explicitly names another branch/commit.\nArchive: unpack fully and identify the real project root.\nSingle file: inspect the complete supplied file and directly relevant local contracts/dependencies when available.\n\nIf the target itself cannot actually be read, return BLOCKED with the exact missing artifact/access. Do not invent evidence.\n\nPROJECT ORIENTATION — FAST, READ-ONLY, NON-BLOCKING\n\nBefore the deep code audit, spend a small bounded setup pass understanding the project itself.\n\nAt the resolved project root, inspect these only when they exist:\n\n- `.saipen/`: root project STATE/BOARD/LOG plus only relevant KNOWLEDGE/kitchen material. Use it as optional historical/work-state context: prior fixes, known failures, active tasks, stale assumptions, baseline drift.\n- Git: use ordinary Git metadata/commands when available (HEAD, branch, status, useful recent history/diff). Do NOT crawl `.git/objects` or spend audit budget reading Git internals.\n- project manifests and lockfiles: package.json, Cargo.toml, pyproject.toml, requirements, go.mod, solution/project files, build config, etc.;\n- tests/fixtures, migrations, schemas, config, docs/contracts, CI/workflow files, scripts and entry points when relevant;\n- other project-local helper/state directories only when they materially explain runtime behavior.\n\nThese sources are ORIENTATION, not gates.\n\nRules:\n- `.saipen/`, Git, docs, tests, manifests, CI or helper folders may be absent. Continue normally.\n- Do not require an external SAIPEN installation, `saipen_home`, BOOT/CORE/MARKHUNT files, validator, portable protocol bundle, or any other out-of-project authority.\n- Do not initialize, repair, rebind, validate or modify `.saipen/`.\n- If `.saipen/` is stale, contradictory, incomplete, or references inaccessible external paths, record that briefly and continue.\n- Live implementation files are authoritative for current behavior.\n- Do not let project-management metadata consume the audit budget. The implementation is the primary target.\n\nBASELINE\n\nRecord the strongest truthful identity available:\n- Git: branch + current commit when readable;\n- archive: archive filename + hash/fingerprint when available;\n- file: filename + hash/fingerprint when available;\n- otherwise the clearest stable identity available.\n\nAUDIT METHOD\n\nBuild a compact map first:\n\nentry points -> parsing/validation -> state owners -> transitions -> core logic -> persistence/I/O -> recovery/error paths -> UI/output -> tests/contracts.\n\nThen follow real execution/data/state paths end-to-end. Audit correctness before style.\n\nHUNT VERIFIED ROOT DEFECTS\n\nPrioritize:\n- broken invariants and contradictory logic;\n- wrong defaults, branches, ordering or state transitions;\n- missing/incorrect validation and invalid partial-state handling;\n- duplicate/competing sources of truth;\n- duplicated implementations whose behavior can drift;\n- dead/unreachable/stale compatibility paths that still affect runtime;\n- partial migrations and config/schema/version drift;\n- persistence, serialization, import/export, restart, recovery and data-loss faults;\n- init/shutdown/teardown/ownership mistakes;\n- concurrency, repeated invocation, stale async result, retry, cancellation and idempotence faults where applicable;\n- UI state disagreeing with runtime state;\n- stale/replaced targets and incorrect fallback selection;\n- API/CLI/docs/config/tests contradicting actual execution;\n- tests that protect the wrong invariant or fail to cover a demonstrated failure.\n\nQUALITY BAR\n\n- Evidence before finding.\n- Root cause before symptom.\n- Merge symptoms sharing one root cause.\n- Preserve correct behavior.\n- No generic cleanup.\n- No speculative redesign.\n- No framework/dependency/telemetry/dashboard proposals unless required by a verified defect.\n- Never fabricate commands, output, test results, timings, paths, commits or reproduction evidence.\n- Use PARTIAL only when the wave genuinely cannot finish within the current execution/context budget. PARTIAL is a resumable machine checkpoint, not a request for user intervention; finish the current evidence cleanly and expect an automatic same-wave continuation.\n- Do not interact with external accounts, services, hosts, endpoints or infrastructure. Local/static project inspection and ordinary project tests are allowed when available and relevant.\n\nTEST EXECUTION / ENVIRONMENT LIMITS\n\nTreat test execution as evidence, not as an artificial gate that can invalidate an otherwise useful audit.\n\nClassify verification truthfully:\n- TEST_PASSED = the relevant intended tests/checks actually ran and passed.\n- TEST_FAILED = a relevant test/check actually ran and failed because of project behavior.\n- TEST_PARTIAL = only part of the relevant intended verification could run.\n- TEST_NOT_RUN_ENVIRONMENT = the intended relevant tests could not start/run because this execution environment lacks an external prerequisite.\n- TEST_NOT_APPLICABLE = there is no meaningful runnable test/check for this audited surface.\n\nEnvironment limitations include unavailable third-party packages, GUI/runtime/display facilities, system libraries, platform capabilities, network/package-install access, toolchains, services, or other prerequisites outside the supplied project.\n\nRules:\n- A dependency that the project correctly declares but this sandbox does not provide is an ENVIRONMENT LIMITATION, not a project defect.\n- If the implementation requires a dependency but the project itself fails to declare/package/document it where its normal runtime/build contract requires that declaration, that may be a real project defect when verified.\n- Do not fabricate a red/green test result for a command that never actually ran.\n- Do not label the whole audit BLOCKED merely because the complete test suite cannot execute. Continue with every meaningful verification still available.\n- Run unaffected tests/checks that do not require the missing prerequisite when practical.\n- Use static inspection, compile/type/syntax checks, focused pure-logic tests, fixture analysis, or other local verification as substitutes where they materially increase confidence.\n- Record the exact unavailable prerequisite and the exact command/error that prevented execution when known.\n- Reduce confidence only for findings whose verification materially depends on the unavailable capability.\n- Do not weaken, skip, rewrite, or make legitimate project tests optional merely to accommodate this sandbox.\n- Do not repeatedly burn audit budget trying the same unavailable installation/setup path. At most one bounded setup attempt is appropriate when the environment clearly supports it and the project declares the setup path.\n- Missing environment capability must never become a fake project ticket merely to make the audit look complete.\n- PARTIAL audit status is for an actually unfinished AUDIT WAVE due to execution/context budget, not merely for partial TEST COVERAGE. A wave may be STATUS ... COMPLETE while TEST_STATUS is TEST_PARTIAL or TEST_NOT_RUN_ENVIRONMENT if the code audit itself is complete and the limitation is explicitly recorded.\n\nEFFICIENCY\n\nDo not read the project alphabetically and do not repeatedly rescan stable areas.\n\nSpend most analysis on state ownership, transitions, persistence, lifecycle, routing, recovery, user-visible behavior and code implicated by real execution paths.\n\nSkip generated/vendor/build/cache output unless runtime or evidence makes it relevant.\n\nPRIORITY\n\nP0 = data corruption/loss, severe local safety/security defect, crash/unusable primary flow, or fundamental correctness failure.\nP1 = significant functional defect, lifecycle/recovery/integration failure, or high-probability user-visible breakage.\nP2 = lower-impact but real defect, concrete maintainability drift likely to cause failure, or missing regression coverage for a verified issue.\n\nFINAL HANDOFF\n\nReturn ONE code block only. It must be directly usable by a separate implementation agent without needing the audit conversation.\n\nHeader exactly:\n\nPROJECT_NAME: <name>\nDATE_TIME: <current session/local date-time when available; otherwise UTC>\nWAVE: AUDIT CORE\nTARGET: <what artifact/project was actually inspected>\nBASELINE: <identity>\nGIT_CONTEXT: <PRESENT branch@commit | ABSENT | UNREADABLE> - <brief note>\nSAIPEN_CONTEXT: <PRESENT | ABSENT | STALE | UNREADABLE> - <brief useful note>\nAUDIT_SCOPE: <compact modules/areas actually inspected>\nTEST_STATUS: <TEST_PASSED | TEST_FAILED | TEST_PARTIAL | TEST_NOT_RUN_ENVIRONMENT | TEST_NOT_APPLICABLE>\nTEST_LIMITATION: <NONE | exact unavailable prerequisite + command/error>\nVERIFIED_INSTEAD: <NONE | concise alternative verification actually performed>\nSTATUS: AUDIT_CORE: <COMPLETE | PARTIAL | BLOCKED>\nTICKETS: <count>\nHANDOFF: IMPLEMENTATION_AGENT\n\nThen tickets in priority order. Each ticket must use:\n\n[P0|P1|P2] [CORE-001] <path/module/symbol>\nEVIDENCE: <specific code/path/behavior proving the issue>\nDEFECT: <root cause and concrete consequence>\nREPAIR: <smallest correct implementation change; name exact areas when established>\nVERIFY: <specific regression test/check that proves the repair without breaking correct behavior>\n\nUse CORE-001, CORE-002... only within this handoff. One root cause per ticket.\n\nIf no verified defects exist:\nTICKETS: 0\nNO VERIFIED CORE DEFECTS.\n\nEnd:\nCORE_DONE_WHEN: <compact explicit implementation + verification gate>\n\nNo prose outside the code block.";
 
-  const AUDIT_SECOND_WAVE = "AUDIT SECOND WAVE — complementary read-only audit for implementation handoff.\n\nROLE\n\nYou are the AUDITOR, not the implementation agent. Do not modify the audited implementation or project metadata.\n\nThis is a second independent lens over the SAME project after Audit Core. Its value is finding verified defects Core did not expose, not repeating Core with different wording.\n\nPRECONDITION / TARGET\n\nUse the same target lineage as the latest completed Audit Core in this conversation unless the user explicitly supplied a newer revision of that project.\n\nA matching completed Core result in the conversation is sufficient continuity. `.saipen/` is optional context only.\n\nIf no matching Core exists, return a concise BLOCKED handoff stating that Audit Core for this target is missing.\n\nPROJECT ORIENTATION — REUSE, THEN REFRESH\n\nReuse Core's established map when still valid.\n\nAt project root, quickly refresh only useful local orientation when present:\n- `.saipen/` root STATE/BOARD/LOG and relevant project memory;\n- Git current HEAD/branch/status/diff metadata through ordinary Git operations, never `.git/objects` crawling;\n- manifests/config/schema/migrations/tests/docs/CI/scripts relevant to changed or boundary behavior.\n\nNone of these are required. Do not require external SAIPEN protocol files or maintain `.saipen/`.\n\nIf current baseline differs from Core:\n- identify changed paths first;\n- revalidate only Core conclusions affected by those changes;\n- preserve unaffected evidence;\n- record the new baseline.\n\nSECOND-WAVE PURPOSE\n\nDo NOT perform Core again.\n\nDo not repeat a Core ticket unless it regressed, remains broken and is necessary to explain a new issue, or new evidence materially changes the diagnosed root cause/repair.\n\nAttack boundaries and failure behavior a first correctness pass commonly misses.\n\nLIFECYCLE / OWNERSHIP\n- cold and repeated startup;\n- partial initialization;\n- shutdown/teardown/cleanup;\n- restart/reopen after failure;\n- multiple writers to mutable state;\n- stale references/caches/subscriptions;\n- ownership changing across async steps.\n\nINPUT / BOUNDARIES\n- empty, missing, malformed, partial and maximum inputs;\n- unusual but valid Unicode, spaces, long paths, locale/platform differences when relevant;\n- optional-value combinations;\n- caller/callee disagreement over null/empty/error semantics.\n\nORDERING / REPEATABILITY\n- duplicate invocation;\n- double click/submit/dispatch;\n- out-of-order or delayed events;\n- cancellation/retry after partial work;\n- stale async completion overwriting newer state;\n- idempotence of migration/import/recovery/cleanup;\n- repeated action after restart.\n\nPERSISTENCE / RECOVERY\n- partial writes;\n- stale stored state after upgrade;\n- crash between related writes;\n- migration run twice;\n- serializer/parser asymmetry;\n- import/export round trip;\n- restart immediately after failure;\n- fallback selecting stale persisted state.\n\nERROR / CONTRACT DRIFT\n- swallowed errors and false success;\n- fallback masking the root cause;\n- API/CLI/config/schema/version/docs mismatch;\n- mocks/fixtures hiding integration behavior.\n\nUI / RUNTIME\n- visible state contradicting runtime;\n- impossible action enabled;\n- stale disabled reason;\n- stale/replaced DOM/state target;\n- reload/reopen/resize/maximize/restore/focus/blur leaving invalid state or unreachable controls.\n\nDUPLICATED TRUTH\n\nSpecifically hunt duplicated constants, selectors, validators, parsers, serializers, mappings, transitions, fallback precedence, path resolution and business rules. Consolidate only when duplication creates concrete drift/failure risk.\n\nQUALITY / EFFICIENCY\n\n- New verified root causes only.\n- Evidence before finding.\n- Root cause before symptom.\n- No checklist padding.\n- No speculative redesign.\n- No external-system interaction.\n- Never fabricate evidence or timings.\n- Use PARTIAL only for a genuine execution/context limit. PARTIAL is a resumable machine checkpoint and must not ask the user to supervise; an automatic same-wave continuation may follow.\n- Reuse Core facts instead of rereading unchanged internals.\n- Spend most budget at cross-module seams, lifecycle boundaries, persistence/recovery, and state transitions.\n\nFINAL HANDOFF\n\nReturn ONE code block only, standalone enough for a separate implementation agent.\n\nHeader exactly:\n\nPROJECT_NAME: <name>\nDATE_TIME: <current session/local date-time when available; otherwise UTC>\nWAVE: AUDIT SECOND WAVE\nTARGET: <artifact/project inspected>\nBASELINE: <current identity>\nCORE_BASELINE: <identity from Core>\nGIT_CONTEXT: <PRESENT branch@commit | ABSENT | UNREADABLE> - <brief note>\nSAIPEN_CONTEXT: <PRESENT | ABSENT | STALE | UNREADABLE> - <brief useful note>\nAUDIT_SCOPE: <compact new/boundary areas inspected>\nSTATUS: SECOND_WAVE: <COMPLETE | PARTIAL | BLOCKED>\nTICKETS: <count>\nHANDOFF: IMPLEMENTATION_AGENT\n\nThen only NEW, REGRESSED, or materially RE-DIAGNOSED findings:\n\n[P0|P1|P2] [W2-001] <path/module/symbol>\nEVIDENCE: <specific evidence>\nDEFECT: <root cause and concrete consequence>\nREPAIR: <smallest correct implementation change>\nVERIFY: <specific regression verification>\n\nUse W2-001, W2-002... only within this handoff.\n\nDo not include unchanged Core tickets merely for completeness.\n\nIf no new defects exist:\nTICKETS: 0\nNO NEW VERIFIED SECOND-WAVE DEFECTS.\n\nEnd:\nSECOND_WAVE_DONE_WHEN: <compact implementation + regression gate>\n\nNo prose outside the code block.";
+  const AUDIT_SECOND_WAVE = "AUDIT SECOND WAVE — complementary read-only audit for implementation handoff.\n\nROLE\n\nYou are the AUDITOR, not the implementation agent. Do not modify the audited implementation or project metadata.\n\nThis is a second independent lens over the SAME project after Audit Core. Its value is finding verified defects Core did not expose, not repeating Core with different wording.\n\nPRECONDITION / TARGET\n\nUse the same target lineage as the latest completed Audit Core in this conversation unless the user explicitly supplied a newer revision of that project.\n\nA matching completed Core result in the conversation is sufficient continuity. `.saipen/` is optional context only.\n\nIf no matching Core exists, return a concise BLOCKED handoff stating that Audit Core for this target is missing.\n\nPROJECT ORIENTATION — REUSE, THEN REFRESH\n\nReuse Core's established map when still valid.\n\nAt project root, quickly refresh only useful local orientation when present:\n- `.saipen/` root STATE/BOARD/LOG and relevant project memory;\n- Git current HEAD/branch/status/diff metadata through ordinary Git operations, never `.git/objects` crawling;\n- manifests/config/schema/migrations/tests/docs/CI/scripts relevant to changed or boundary behavior.\n\nNone of these are required. Do not require external SAIPEN protocol files or maintain `.saipen/`.\n\nIf current baseline differs from Core:\n- identify changed paths first;\n- revalidate only Core conclusions affected by those changes;\n- preserve unaffected evidence;\n- record the new baseline.\n\nSECOND-WAVE PURPOSE\n\nDo NOT perform Core again.\n\nDo not repeat a Core ticket unless it regressed, remains broken and is necessary to explain a new issue, or new evidence materially changes the diagnosed root cause/repair.\n\nAttack boundaries and failure behavior a first correctness pass commonly misses.\n\nLIFECYCLE / OWNERSHIP\n- cold and repeated startup;\n- partial initialization;\n- shutdown/teardown/cleanup;\n- restart/reopen after failure;\n- multiple writers to mutable state;\n- stale references/caches/subscriptions;\n- ownership changing across async steps.\n\nINPUT / BOUNDARIES\n- empty, missing, malformed, partial and maximum inputs;\n- unusual but valid Unicode, spaces, long paths, locale/platform differences when relevant;\n- optional-value combinations;\n- caller/callee disagreement over null/empty/error semantics.\n\nORDERING / REPEATABILITY\n- duplicate invocation;\n- double click/submit/dispatch;\n- out-of-order or delayed events;\n- cancellation/retry after partial work;\n- stale async completion overwriting newer state;\n- idempotence of migration/import/recovery/cleanup;\n- repeated action after restart.\n\nPERSISTENCE / RECOVERY\n- partial writes;\n- stale stored state after upgrade;\n- crash between related writes;\n- migration run twice;\n- serializer/parser asymmetry;\n- import/export round trip;\n- restart immediately after failure;\n- fallback selecting stale persisted state.\n\nERROR / CONTRACT DRIFT\n- swallowed errors and false success;\n- fallback masking the root cause;\n- API/CLI/config/schema/version/docs mismatch;\n- mocks/fixtures hiding integration behavior.\n\nUI / RUNTIME\n- visible state contradicting runtime;\n- impossible action enabled;\n- stale disabled reason;\n- stale/replaced DOM/state target;\n- reload/reopen/resize/maximize/restore/focus/blur leaving invalid state or unreachable controls.\n\nDUPLICATED TRUTH\n\nSpecifically hunt duplicated constants, selectors, validators, parsers, serializers, mappings, transitions, fallback precedence, path resolution and business rules. Consolidate only when duplication creates concrete drift/failure risk.\n\nQUALITY / EFFICIENCY\n\n- New verified root causes only.\n- Evidence before finding.\n- Root cause before symptom.\n- No checklist padding.\n- No speculative redesign.\n- No external-system interaction.\n- Never fabricate evidence or timings.\n- Use PARTIAL only for a genuine execution/context limit. PARTIAL is a resumable machine checkpoint and must not ask the user to supervise; an automatic same-wave continuation may follow.\n- Reuse Core facts instead of rereading unchanged internals.\n- Spend most budget at cross-module seams, lifecycle boundaries, persistence/recovery, and state transitions.\n\nTEST EXECUTION / ENVIRONMENT LIMITS\n\nTreat test execution as evidence, not as an artificial gate that can invalidate an otherwise useful audit.\n\nClassify verification truthfully:\n- TEST_PASSED = the relevant intended tests/checks actually ran and passed.\n- TEST_FAILED = a relevant test/check actually ran and failed because of project behavior.\n- TEST_PARTIAL = only part of the relevant intended verification could run.\n- TEST_NOT_RUN_ENVIRONMENT = the intended relevant tests could not start/run because this execution environment lacks an external prerequisite.\n- TEST_NOT_APPLICABLE = there is no meaningful runnable test/check for this audited surface.\n\nEnvironment limitations include unavailable third-party packages, GUI/runtime/display facilities, system libraries, platform capabilities, network/package-install access, toolchains, services, or other prerequisites outside the supplied project.\n\nRules:\n- A dependency that the project correctly declares but this sandbox does not provide is an ENVIRONMENT LIMITATION, not a project defect.\n- If the implementation requires a dependency but the project itself fails to declare/package/document it where its normal runtime/build contract requires that declaration, that may be a real project defect when verified.\n- Do not fabricate a red/green test result for a command that never actually ran.\n- Do not label the whole audit BLOCKED merely because the complete test suite cannot execute. Continue with every meaningful verification still available.\n- Run unaffected tests/checks that do not require the missing prerequisite when practical.\n- Use static inspection, compile/type/syntax checks, focused pure-logic tests, fixture analysis, or other local verification as substitutes where they materially increase confidence.\n- Record the exact unavailable prerequisite and the exact command/error that prevented execution when known.\n- Reduce confidence only for findings whose verification materially depends on the unavailable capability.\n- Do not weaken, skip, rewrite, or make legitimate project tests optional merely to accommodate this sandbox.\n- Do not repeatedly burn audit budget trying the same unavailable installation/setup path. At most one bounded setup attempt is appropriate when the environment clearly supports it and the project declares the setup path.\n- Missing environment capability must never become a fake project ticket merely to make the audit look complete.\n- PARTIAL audit status is for an actually unfinished AUDIT WAVE due to execution/context budget, not merely for partial TEST COVERAGE. A wave may be STATUS ... COMPLETE while TEST_STATUS is TEST_PARTIAL or TEST_NOT_RUN_ENVIRONMENT if the code audit itself is complete and the limitation is explicitly recorded.\n\nFINAL HANDOFF\n\nReturn ONE code block only, standalone enough for a separate implementation agent.\n\nHeader exactly:\n\nPROJECT_NAME: <name>\nDATE_TIME: <current session/local date-time when available; otherwise UTC>\nWAVE: AUDIT SECOND WAVE\nTARGET: <artifact/project inspected>\nBASELINE: <current identity>\nCORE_BASELINE: <identity from Core>\nGIT_CONTEXT: <PRESENT branch@commit | ABSENT | UNREADABLE> - <brief note>\nSAIPEN_CONTEXT: <PRESENT | ABSENT | STALE | UNREADABLE> - <brief useful note>\nAUDIT_SCOPE: <compact new/boundary areas inspected>\nTEST_STATUS: <TEST_PASSED | TEST_FAILED | TEST_PARTIAL | TEST_NOT_RUN_ENVIRONMENT | TEST_NOT_APPLICABLE>\nTEST_LIMITATION: <NONE | exact unavailable prerequisite + command/error>\nVERIFIED_INSTEAD: <NONE | concise alternative verification actually performed>\nSTATUS: SECOND_WAVE: <COMPLETE | PARTIAL | BLOCKED>\nTICKETS: <count>\nHANDOFF: IMPLEMENTATION_AGENT\n\nThen only NEW, REGRESSED, or materially RE-DIAGNOSED findings:\n\n[P0|P1|P2] [W2-001] <path/module/symbol>\nEVIDENCE: <specific evidence>\nDEFECT: <root cause and concrete consequence>\nREPAIR: <smallest correct implementation change>\nVERIFY: <specific regression verification>\n\nUse W2-001, W2-002... only within this handoff.\n\nDo not include unchanged Core tickets merely for completeness.\n\nIf no new defects exist:\nTICKETS: 0\nNO NEW VERIFIED SECOND-WAVE DEFECTS.\n\nEnd:\nSECOND_WAVE_DONE_WHEN: <compact implementation + regression gate>\n\nNo prose outside the code block.";
 
-  const AUDIT_PERFORMANCE = "AUDIT PERFORMANCE / STABILITY / EFFECTIVENESS — third read-only audit wave for implementation handoff.\n\nROLE\n\nYou are the AUDITOR, not the implementation agent. Do not modify the audited implementation or project metadata.\n\nThis is the third lens over the SAME target after Audit Core and Audit Second Wave. Spend the audit budget on material responsiveness, latency, stability, bounded resource use and simpler effective execution without changing correct observable behavior.\n\nPRECONDITION / TARGET\n\nUse the same target lineage as the latest matching Core and Second Wave results in this conversation unless the user explicitly supplied a newer revision.\n\nBoth earlier waves must exist for this target. If either is missing, return a concise BLOCKED handoff naming the missing wave.\n\nPROJECT ORIENTATION — REUSE, THEN REFRESH\n\nReuse structural understanding from the first two waves.\n\nWhen present, quickly inspect only useful local context:\n- `.saipen/` root STATE/BOARD/LOG and relevant memory for recent implementation work;\n- Git current HEAD/branch/status/diff through ordinary Git commands, not `.git/objects` crawling;\n- performance-related config/build manifests/tests/benchmarks and only other project metadata needed to understand a hot path.\n\nThese are optional. Never require an external SAIPEN installation or modify `.saipen/`.\n\nIf baseline changed since Second Wave:\n- identify changed paths first;\n- revalidate only affected correctness/stability assumptions;\n- never optimize stale code paths.\n\nPRIMARY OBJECTIVE\n\nCorrectness and observable behavior are invariants. Reject benchmark cosmetics that damage determinism, accessibility, recovery, explicit state or useful error reporting.\n\nTrace frequent paths such as startup, button click, pointer move, keystroke/input, render/update, state transition, parsing, validation, serialization, local persistence/I/O, retry, recovery and shutdown.\n\nCOMPUTATION\n- repeated parsing/serialization/validation/normalization of unchanged data;\n- duplicate transforms/copies/allocations;\n- unnecessary full scans/sorts/filters;\n- repeated linear lookup inside loops and realistic O(n²) paths;\n- expensive fallback used on normal success.\n\nUI / DOM\n- broad/repeated document/tree scans;\n- selectors not scoped to a stable root;\n- repeated layout reads/writes and reflow thrash;\n- unnecessary rerender/rebuild/repaint;\n- synchronous work delaying visible input/button feedback;\n- listener multiplication and stale subscriptions;\n- detached-node retention;\n- stale cache or cache without explicit invalidation;\n- repeated rediscovery during retries;\n- excessive work per pointermove/keystroke/frame;\n- resize/maximize/restore/focus/blur causing stale geometry or targets.\n\nASYNC / STABILITY\n- double submit/dispatch/callback;\n- stale async result overwriting newer state;\n- ignored cancellation;\n- work continuing after target/state changed;\n- retry storms or excessive retry chains;\n- timer polling where a reliable event exists;\n- teardown while work is pending;\n- nondeterministic repeated-operation ordering.\n\nMEMORY / RESOURCE BOUNDS\n- unbounded queues, arrays, maps, sets, logs, buffers or caches;\n- retained detached objects/nodes;\n- duplicate large strings/data;\n- resources not released over long sessions.\n\nI/O / STARTUP\n- repeated read/write of unchanged local state;\n- full-state serialization for tiny changes;\n- expensive local I/O in hot UI paths;\n- repeated hashing/path resolution of stable data;\n- eager loading/scanning that can safely be lazy.\n\nEFFECTIVENESS\n- duplicated hot-path branches that can become one canonical path;\n- unnecessary abstraction/indirection adding material work;\n- complex execution where a smaller path preserves semantics;\n- cache only stable data with explicit invalidation;\n- prefer event-driven work over polling when behavior stays deterministic.\n\nEVIDENCE CLASS\n\nEvery ticket must be exactly one:\n\nPROVEN BOTTLENECK = directly measured or demonstrated from available evidence.\nSTRONGLY EVIDENCED WASTE = execution structure clearly performs unnecessary material work.\nLOW-RISK SIMPLIFICATION = behavior-preserving simplification with credible latency/stability/effectiveness benefit.\n\nNever fabricate timings.\nUse PARTIAL only for a genuine execution/context limit. PARTIAL is a resumable machine checkpoint, not a request for human intervention; expect an automatic same-wave continuation. If measurement is unavailable, prescribe an exact local benchmark/regression method.\n\nDo not interact with or load-test external systems.\n\nNO EARLIER-WAVE REHASH\n\nDo not repeat Core/Second findings unless performance/stability analysis materially changes their root cause or required repair.\n\nFINAL HANDOFF\n\nReturn ONE code block only, standalone for a separate implementation agent.\n\nHeader exactly:\n\nPROJECT_NAME: <name>\nDATE_TIME: <current session/local date-time when available; otherwise UTC>\nWAVE: AUDIT PERFORMANCE / STABILITY / EFFECTIVENESS\nTARGET: <artifact/project inspected>\nBASELINE: <current identity>\nPREVIOUS_BASELINE: <Second Wave identity>\nGIT_CONTEXT: <PRESENT branch@commit | ABSENT | UNREADABLE> - <brief note>\nSAIPEN_CONTEXT: <PRESENT | ABSENT | STALE | UNREADABLE> - <brief useful note>\nAUDIT_SCOPE: <compact hot paths/areas inspected>\nSTATUS: PERFORMANCE: <COMPLETE | PARTIAL | BLOCKED>\nTICKETS: <count>\nHANDOFF: IMPLEMENTATION_AGENT\n\nThen only material findings:\n\n[P0|P1|P2] [PERF-001] <PROVEN BOTTLENECK|STRONGLY EVIDENCED WASTE|LOW-RISK SIMPLIFICATION> <path/module/symbol>\nEVIDENCE: <specific hot-path/stability evidence>\nISSUE: <verified waste/root cause and consequence>\nOPTIMIZE: <smallest behavior-preserving change>\nGUARDRAIL: <correct behavior that must remain unchanged>\nVERIFY: <benchmark/regression procedure>\n\nUse PERF-001, PERF-002... only within this handoff.\n\nIf no material findings exist:\nTICKETS: 0\nNO MATERIAL PERFORMANCE/STABILITY FINDINGS.\n\nEnd:\nPERFORMANCE_DONE_WHEN: <compact latency/stability/behavior verification gate>\n\nNo prose outside the code block.";
+  const AUDIT_PERFORMANCE = "AUDIT PERFORMANCE / STABILITY / EFFECTIVENESS — third read-only audit wave for implementation handoff.\n\nROLE\n\nYou are the AUDITOR, not the implementation agent. Do not modify the audited implementation or project metadata.\n\nThis is the third lens over the SAME target after Audit Core and Audit Second Wave. Spend the audit budget on material responsiveness, latency, stability, bounded resource use and simpler effective execution without changing correct observable behavior.\n\nPRECONDITION / TARGET\n\nUse the same target lineage as the latest matching Core and Second Wave results in this conversation unless the user explicitly supplied a newer revision.\n\nBoth earlier waves must exist for this target. If either is missing, return a concise BLOCKED handoff naming the missing wave.\n\nPROJECT ORIENTATION — REUSE, THEN REFRESH\n\nReuse structural understanding from the first two waves.\n\nWhen present, quickly inspect only useful local context:\n- `.saipen/` root STATE/BOARD/LOG and relevant memory for recent implementation work;\n- Git current HEAD/branch/status/diff through ordinary Git commands, not `.git/objects` crawling;\n- performance-related config/build manifests/tests/benchmarks and only other project metadata needed to understand a hot path.\n\nThese are optional. Never require an external SAIPEN installation or modify `.saipen/`.\n\nIf baseline changed since Second Wave:\n- identify changed paths first;\n- revalidate only affected correctness/stability assumptions;\n- never optimize stale code paths.\n\nPRIMARY OBJECTIVE\n\nCorrectness and observable behavior are invariants. Reject benchmark cosmetics that damage determinism, accessibility, recovery, explicit state or useful error reporting.\n\nTrace frequent paths such as startup, button click, pointer move, keystroke/input, render/update, state transition, parsing, validation, serialization, local persistence/I/O, retry, recovery and shutdown.\n\nCOMPUTATION\n- repeated parsing/serialization/validation/normalization of unchanged data;\n- duplicate transforms/copies/allocations;\n- unnecessary full scans/sorts/filters;\n- repeated linear lookup inside loops and realistic O(n²) paths;\n- expensive fallback used on normal success.\n\nUI / DOM\n- broad/repeated document/tree scans;\n- selectors not scoped to a stable root;\n- repeated layout reads/writes and reflow thrash;\n- unnecessary rerender/rebuild/repaint;\n- synchronous work delaying visible input/button feedback;\n- listener multiplication and stale subscriptions;\n- detached-node retention;\n- stale cache or cache without explicit invalidation;\n- repeated rediscovery during retries;\n- excessive work per pointermove/keystroke/frame;\n- resize/maximize/restore/focus/blur causing stale geometry or targets.\n\nASYNC / STABILITY\n- double submit/dispatch/callback;\n- stale async result overwriting newer state;\n- ignored cancellation;\n- work continuing after target/state changed;\n- retry storms or excessive retry chains;\n- timer polling where a reliable event exists;\n- teardown while work is pending;\n- nondeterministic repeated-operation ordering.\n\nMEMORY / RESOURCE BOUNDS\n- unbounded queues, arrays, maps, sets, logs, buffers or caches;\n- retained detached objects/nodes;\n- duplicate large strings/data;\n- resources not released over long sessions.\n\nI/O / STARTUP\n- repeated read/write of unchanged local state;\n- full-state serialization for tiny changes;\n- expensive local I/O in hot UI paths;\n- repeated hashing/path resolution of stable data;\n- eager loading/scanning that can safely be lazy.\n\nEFFECTIVENESS\n- duplicated hot-path branches that can become one canonical path;\n- unnecessary abstraction/indirection adding material work;\n- complex execution where a smaller path preserves semantics;\n- cache only stable data with explicit invalidation;\n- prefer event-driven work over polling when behavior stays deterministic.\n\nEVIDENCE CLASS\n\nEvery ticket must be exactly one:\n\nPROVEN BOTTLENECK = directly measured or demonstrated from available evidence.\nSTRONGLY EVIDENCED WASTE = execution structure clearly performs unnecessary material work.\nLOW-RISK SIMPLIFICATION = behavior-preserving simplification with credible latency/stability/effectiveness benefit.\n\nNever fabricate timings.\nUse PARTIAL only for a genuine execution/context limit. PARTIAL is a resumable machine checkpoint, not a request for human intervention; expect an automatic same-wave continuation. If measurement is unavailable, prescribe an exact local benchmark/regression method.\n\nDo not interact with or load-test external systems.\n\nTEST EXECUTION / ENVIRONMENT LIMITS\n\nTreat test execution as evidence, not as an artificial gate that can invalidate an otherwise useful audit.\n\nClassify verification truthfully:\n- TEST_PASSED = the relevant intended tests/checks actually ran and passed.\n- TEST_FAILED = a relevant test/check actually ran and failed because of project behavior.\n- TEST_PARTIAL = only part of the relevant intended verification could run.\n- TEST_NOT_RUN_ENVIRONMENT = the intended relevant tests could not start/run because this execution environment lacks an external prerequisite.\n- TEST_NOT_APPLICABLE = there is no meaningful runnable test/check for this audited surface.\n\nEnvironment limitations include unavailable third-party packages, GUI/runtime/display facilities, system libraries, platform capabilities, network/package-install access, toolchains, services, or other prerequisites outside the supplied project.\n\nRules:\n- A dependency that the project correctly declares but this sandbox does not provide is an ENVIRONMENT LIMITATION, not a project defect.\n- If the implementation requires a dependency but the project itself fails to declare/package/document it where its normal runtime/build contract requires that declaration, that may be a real project defect when verified.\n- Do not fabricate a red/green test result for a command that never actually ran.\n- Do not label the whole audit BLOCKED merely because the complete test suite cannot execute. Continue with every meaningful verification still available.\n- Run unaffected tests/checks that do not require the missing prerequisite when practical.\n- Use static inspection, compile/type/syntax checks, focused pure-logic tests, fixture analysis, or other local verification as substitutes where they materially increase confidence.\n- Record the exact unavailable prerequisite and the exact command/error that prevented execution when known.\n- Reduce confidence only for findings whose verification materially depends on the unavailable capability.\n- Do not weaken, skip, rewrite, or make legitimate project tests optional merely to accommodate this sandbox.\n- Do not repeatedly burn audit budget trying the same unavailable installation/setup path. At most one bounded setup attempt is appropriate when the environment clearly supports it and the project declares the setup path.\n- Missing environment capability must never become a fake project ticket merely to make the audit look complete.\n- PARTIAL audit status is for an actually unfinished AUDIT WAVE due to execution/context budget, not merely for partial TEST COVERAGE. A wave may be STATUS ... COMPLETE while TEST_STATUS is TEST_PARTIAL or TEST_NOT_RUN_ENVIRONMENT if the code audit itself is complete and the limitation is explicitly recorded.\n\nNO EARLIER-WAVE REHASH\n\nDo not repeat Core/Second findings unless performance/stability analysis materially changes their root cause or required repair.\n\nFINAL HANDOFF\n\nReturn ONE code block only, standalone for a separate implementation agent.\n\nHeader exactly:\n\nPROJECT_NAME: <name>\nDATE_TIME: <current session/local date-time when available; otherwise UTC>\nWAVE: AUDIT PERFORMANCE / STABILITY / EFFECTIVENESS\nTARGET: <artifact/project inspected>\nBASELINE: <current identity>\nPREVIOUS_BASELINE: <Second Wave identity>\nGIT_CONTEXT: <PRESENT branch@commit | ABSENT | UNREADABLE> - <brief note>\nSAIPEN_CONTEXT: <PRESENT | ABSENT | STALE | UNREADABLE> - <brief useful note>\nAUDIT_SCOPE: <compact hot paths/areas inspected>\nTEST_STATUS: <TEST_PASSED | TEST_FAILED | TEST_PARTIAL | TEST_NOT_RUN_ENVIRONMENT | TEST_NOT_APPLICABLE>\nTEST_LIMITATION: <NONE | exact unavailable prerequisite + command/error>\nVERIFIED_INSTEAD: <NONE | concise alternative verification actually performed>\nSTATUS: PERFORMANCE: <COMPLETE | PARTIAL | BLOCKED>\nTICKETS: <count>\nHANDOFF: IMPLEMENTATION_AGENT\n\nThen only material findings:\n\n[P0|P1|P2] [PERF-001] <PROVEN BOTTLENECK|STRONGLY EVIDENCED WASTE|LOW-RISK SIMPLIFICATION> <path/module/symbol>\nEVIDENCE: <specific hot-path/stability evidence>\nISSUE: <verified waste/root cause and consequence>\nOPTIMIZE: <smallest behavior-preserving change>\nGUARDRAIL: <correct behavior that must remain unchanged>\nVERIFY: <benchmark/regression procedure>\n\nUse PERF-001, PERF-002... only within this handoff.\n\nIf no material findings exist:\nTICKETS: 0\nNO MATERIAL PERFORMANCE/STABILITY FINDINGS.\n\nEnd:\nPERFORMANCE_DONE_WHEN: <compact latency/stability/behavior verification gate>\n\nNo prose outside the code block.";
 
   const BUILTIN_PRESETS = [
     {
@@ -207,6 +263,170 @@
   text-overflow: ellipsis !important;
 }
 
+
+#acb-super-toggle {
+  flex: 0 0 auto !important;
+  min-width: 38px !important;
+  min-height: 18px !important;
+  height: 18px !important;
+  padding: 1px 4px !important;
+  font-size: 10px !important;
+}
+
+#acb-super-controls {
+  display: none !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  height: 20px !important;
+  align-items: center !important;
+  gap: 3px !important;
+  overflow: hidden !important;
+}
+
+
+#acb-popup #acb-new-chat {
+  flex: 0 0 18px !important;
+  width: 18px !important;
+  min-width: 18px !important;
+  max-width: 18px !important;
+  height: 18px !important;
+  min-height: 18px !important;
+  max-height: 18px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border-width: 1px !important;
+  font-size: 14px !important;
+  line-height: 16px !important;
+  font-weight: 700 !important;
+  overflow: hidden !important;
+}
+
+#acb-super-brand {
+  flex: 1 1 82px !important;
+  width: auto !important;
+  min-width: 30px !important;
+  max-width: 100px !important;
+  color: var(--textPrimary) !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  text-align: left !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+#acb-super-auto-label {
+  flex: 0 0 18px !important;
+  width: 18px !important;
+  height: 18px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  cursor: pointer !important;
+}
+
+#acb-popup #acb-super-enabled {
+  width: 14px !important;
+  min-width: 14px !important;
+  max-width: 14px !important;
+  height: 14px !important;
+  min-height: 14px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  accent-color: var(--accentTeal) !important;
+  appearance: auto !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+#acb-super-progress {
+  flex: 0 0 66px !important;
+  width: 66px !important;
+  height: 18px !important;
+  display: grid !important;
+  grid-template-columns: repeat(3, 1fr) !important;
+  gap: 2px !important;
+}
+
+.acb-super-step {
+  min-width: 0 !important;
+  height: 18px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 0 !important;
+  background: var(--compareBack) !important;
+  color: var(--textMuted) !important;
+  border: 1px solid var(--borderMuted) !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  line-height: 1 !important;
+}
+
+.acb-super-step[data-state="active"] {
+  background: var(--selection) !important;
+  color: var(--borderHighlight) !important;
+  border-color: var(--bevelLight) !important;
+}
+
+.acb-super-step[data-state="done"] {
+  background: var(--surface) !important;
+  color: var(--textPrimary) !important;
+}
+
+#acb-super-state {
+  flex: 1 1 auto !important;
+  min-width: 42px !important;
+  max-width: 78px !important;
+  height: 18px !important;
+  display: flex !important;
+  align-items: center !important;
+  padding: 0 3px !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+  text-overflow: ellipsis !important;
+  background: var(--compareBack) !important;
+  color: var(--textSecondary) !important;
+  border: 1px solid var(--borderMuted) !important;
+  font-size: 9px !important;
+  line-height: 1 !important;
+}
+
+#acb-super-state[data-kind="success"] { color: var(--textPrimary) !important; }
+#acb-super-state[data-kind="warning"] { color: var(--borderHighlight) !important; }
+#acb-super-state[data-kind="error"] { color: var(--dangerText) !important; }
+
+#acb-popup[data-supercompact="true"] #acb-titlebar {
+  height: 24px !important;
+  min-height: 24px !important;
+  gap: 3px !important;
+  padding: 2px 3px !important;
+  border-bottom: 0 !important;
+}
+
+#acb-popup[data-supercompact="true"] #acb-title,
+#acb-popup[data-supercompact="true"] #acb-site,
+#acb-popup[data-supercompact="true"] #acb-collapse,
+#acb-popup[data-supercompact="true"] #acb-tabs,
+#acb-popup[data-supercompact="true"] #acb-content,
+#acb-popup[data-supercompact="true"] #acb-status {
+  display: none !important;
+}
+
+#acb-popup[data-supercompact="true"] #acb-super-controls {
+  display: flex !important;
+}
+
+#acb-popup[data-supercompact="true"] #acb-super-toggle {
+  min-width: 36px !important;
+  width: 36px !important;
+  height: 18px !important;
+  min-height: 18px !important;
+  padding: 1px 3px !important;
+}
+
 #acb-popup button,
 #acb-popup .acb-buttonlike {
   min-width: 30px !important;
@@ -244,6 +464,58 @@
   color: var(--textMuted) !important;
   background: var(--surfaceRaised) !important;
   cursor: default !important;
+}
+
+
+/* SUPER COMPACT GEOMETRY ISOLATION
+   Keep this selector more specific than the generic #acb-popup button rule.
+   The mini monitor must never inherit full-size button geometry. */
+#acb-popup[data-supercompact="true"] #acb-super-progress {
+  flex: 0 0 72px !important;
+  width: 72px !important;
+  min-width: 72px !important;
+  max-width: 72px !important;
+  height: 18px !important;
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 2px !important;
+  overflow: visible !important;
+}
+
+#acb-popup[data-supercompact="true"] #acb-super-progress > .acb-super-step {
+  box-sizing: border-box !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  width: 100% !important;
+  min-height: 18px !important;
+  max-height: 18px !important;
+  height: 18px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border-width: 1px !important;
+  font-size: 10px !important;
+  line-height: 16px !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+  transform: none !important;
+}
+
+#acb-popup[data-supercompact="true"] #acb-super-progress > .acb-super-step:active {
+  transform: translate(1px, 1px) !important;
+}
+
+#acb-popup[data-supercompact="true"] #acb-super-state {
+  flex: 1 1 48px !important;
+  min-width: 42px !important;
+  max-width: 78px !important;
+}
+
+#acb-popup[data-supercompact="true"] #acb-super-toggle {
+  flex: 0 0 36px !important;
+  min-width: 36px !important;
+  max-width: 36px !important;
+  width: 36px !important;
+  box-sizing: border-box !important;
 }
 
 #acb-collapse {
@@ -358,6 +630,178 @@
 }
 #acb-popup input.acb-error,
 #acb-popup textarea.acb-error { border-color: var(--danger) !important; color: var(--dangerText) !important; }
+
+
+/* COMPACT CHECKBOXES: never inherit text-input geometry. */
+#acb-popup input[type="checkbox"] {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  position: relative !important;
+  flex: 0 0 11px !important;
+  width: 11px !important;
+  min-width: 11px !important;
+  max-width: 11px !important;
+  height: 11px !important;
+  min-height: 11px !important;
+  max-height: 11px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 1px solid var(--bevelLight) !important;
+  background: var(--compareBack) !important;
+  color: var(--borderHighlight) !important;
+  cursor: pointer !important;
+}
+#acb-popup input[type="checkbox"]:checked {
+  background: var(--accentTealDeep) !important;
+  border-color: var(--accentTeal) !important;
+}
+#acb-popup input[type="checkbox"]:checked::after {
+  content: "✓" !important;
+  position: absolute !important;
+  inset: -1px 0 0 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: var(--borderHighlight) !important;
+  font-family: Verdana, sans-serif !important;
+  font-size: 9px !important;
+  font-weight: 700 !important;
+  line-height: 10px !important;
+}
+#acb-popup input[type="checkbox"]:focus-visible {
+  outline: 1px solid var(--borderHighlight) !important;
+  outline-offset: 1px !important;
+}
+#acb-popup .acb-check-row {
+  min-height: 17px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  padding: 1px 2px !important;
+  background: transparent !important;
+  border: 0 !important;
+  color: var(--textPrimary) !important;
+  font-size: 10px !important;
+  cursor: pointer !important;
+}
+#acb-auto-head {
+  grid-template-columns: minmax(66px, 1fr) 52px 58px 52px !important;
+}
+#acb-auto-toggle-label,
+#acb-auto-save-label {
+  min-width: 0 !important;
+  min-height: 24px !important;
+  height: 24px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 4px !important;
+  padding: 2px 4px !important;
+  color: var(--textPrimary) !important;
+  background: var(--surfaceRaised) !important;
+  border: 1px solid var(--borderMuted) !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  cursor: pointer !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+}
+#acb-auto-adopt,
+#acb-auto-stop {
+  min-height: 24px !important;
+  height: 24px !important;
+}
+#acb-auto-state-row {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) 52px !important;
+  gap: 3px !important;
+  margin-top: 4px !important;
+}
+#acb-auto-state-row #acb-auto-state { margin-top: 0 !important; }
+#acb-save-now {
+  min-width: 0 !important;
+  min-height: 24px !important;
+  height: 24px !important;
+  padding: 2px 3px !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+}
+#acb-save-now[data-state="pending"] {
+  background: var(--accentTealDeep) !important;
+  color: var(--borderHighlight) !important;
+  border-color: var(--accentTeal) !important;
+}
+#acb-save-now[data-state="error"] {
+  background: var(--danger) !important;
+  color: var(--dangerText) !important;
+  border-color: var(--dangerText) !important;
+}
+#acb-save-now[data-state="saved"] {
+  background: var(--success) !important;
+  color: var(--textPrimary) !important;
+}
+#acb-audit-copy-hint {
+  margin-top: 3px !important;
+  color: var(--textMuted) !important;
+  font-size: 9px !important;
+  line-height: 1.2 !important;
+}
+.acb-auto-step[data-copy-ready="true"],
+.acb-super-step[data-copy-ready="true"] { cursor: copy !important; }
+.acb-auto-step[data-copied="true"],
+.acb-super-step[data-copied="true"] {
+  background: var(--accentTealDeep) !important;
+  color: var(--borderHighlight) !important;
+  border-color: var(--accentTeal) !important;
+}
+#acb-popup[data-supercompact="true"] #acb-super-auto-label,
+#acb-popup[data-supercompact="true"] #acb-super-save-label {
+  flex: 0 0 auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  height: 18px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 2px !important;
+  margin: 0 !important;
+  padding: 0 1px !important;
+  color: var(--textSecondary) !important;
+  font-size: 9px !important;
+  font-weight: 700 !important;
+  cursor: pointer !important;
+  white-space: nowrap !important;
+}
+#acb-popup[data-supercompact="true"] #acb-super-state {
+  min-width: 42px !important;
+  min-height: 18px !important;
+  max-height: 18px !important;
+  height: 18px !important;
+  margin: 0 !important;
+  padding: 0 3px !important;
+  border-width: 1px !important;
+  font-size: 9px !important;
+  line-height: 16px !important;
+  cursor: pointer !important;
+}
+#acb-popup[data-supercompact="true"] #acb-super-state:active {
+  transform: translate(1px, 1px) !important;
+}
+#acb-popup #acb-super-enabled,
+#acb-popup #acb-super-save,
+#acb-popup #acb-auto-enabled,
+#acb-popup #acb-auto-save-run {
+  width: 11px !important;
+  min-width: 11px !important;
+  max-width: 11px !important;
+  height: 11px !important;
+  min-height: 11px !important;
+  max-height: 11px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+}
 
 /* RUN: automation stays visible, configuration does not. */
 #acb-auto-audit {
@@ -632,6 +1076,226 @@
   font-size: 10px !important;
 }
 
+
+/* AUDIT STATUS COLORS + COPYABLE WAVES */
+.acb-auto-step,
+.acb-super-step {
+  cursor: pointer !important;
+  user-select: none !important;
+}
+.acb-auto-step[data-state="active"],
+.acb-super-step[data-state="active"] {
+  background: var(--warning) !important;
+  color: var(--textPrimary) !important;
+  border-color: var(--borderHighlight) !important;
+}
+.acb-auto-step[data-state="done"],
+.acb-super-step[data-state="done"] {
+  background: var(--success) !important;
+  color: var(--textPrimary) !important;
+  border-color: var(--bevelLight) !important;
+}
+.acb-auto-step[data-state="recover"],
+.acb-super-step[data-state="recover"] {
+  background: var(--accentTealDeep) !important;
+  color: var(--borderHighlight) !important;
+  border-color: var(--accentTeal) !important;
+}
+.acb-auto-step[data-state="paused"],
+.acb-super-step[data-state="paused"] {
+  background: var(--danger) !important;
+  color: var(--dangerText) !important;
+  border-color: var(--dangerText) !important;
+}
+.acb-auto-step[data-copy-ready="true"],
+.acb-super-step[data-copy-ready="true"] {
+  text-decoration: underline !important;
+  text-underline-offset: 2px !important;
+}
+#acb-super-state[data-state="done"] {
+  background: var(--success) !important;
+  color: var(--textPrimary) !important;
+  border-color: var(--bevelLight) !important;
+}
+#acb-super-state[data-state="running"] {
+  background: var(--warning) !important;
+  color: var(--textPrimary) !important;
+  border-color: var(--borderHighlight) !important;
+}
+#acb-super-state[data-state="recover"] {
+  background: var(--accentTealDeep) !important;
+  color: var(--borderHighlight) !important;
+  border-color: var(--accentTeal) !important;
+}
+#acb-super-state[data-state="attention"] {
+  background: var(--danger) !important;
+  color: var(--dangerText) !important;
+  border-color: var(--dangerText) !important;
+}
+#acb-super-state[data-state="standby"] {
+  background: var(--surface) !important;
+  color: var(--textSecondary) !important;
+}
+
+#acb-super-state[data-state="start"] {
+  background: var(--accentTealDeep) !important;
+  color: var(--borderHighlight) !important;
+  border-color: var(--accentTeal) !important;
+  font-weight: 700 !important;
+}
+
+#acb-super-state[data-state="start"]:disabled {
+  background: var(--surfaceRaised) !important;
+  color: var(--textMuted) !important;
+  border-color: var(--borderMuted) !important;
+}
+
+
+/* AUDIT STAGE COLOR LADDER
+   Golden Default only: CORE gold -> W2 olive -> PERF teal -> DONE green. */
+.acb-auto-step[data-step="1"][data-state="active"],
+.acb-super-step[data-step="1"][data-state="active"] {
+  background: var(--surfaceAlt) !important;
+  color: var(--borderHighlight) !important;
+  border-color: var(--borderHighlight) !important;
+}
+
+.acb-auto-step[data-step="2"][data-state="active"],
+.acb-super-step[data-step="2"][data-state="active"] {
+  background: var(--warning) !important;
+  color: var(--textPrimary) !important;
+  border-color: var(--borderHighlight) !important;
+}
+
+.acb-auto-step[data-step="3"][data-state="active"],
+.acb-super-step[data-step="3"][data-state="active"] {
+  background: var(--accentTealDeep) !important;
+  color: var(--borderHighlight) !important;
+  border-color: var(--accentTeal) !important;
+}
+
+#acb-super-state[data-phase="core"]:not([data-state="attention"]),
+#acb-auto-state[data-phase="core"] {
+  background: var(--surfaceAlt) !important;
+  color: var(--borderHighlight) !important;
+  border-color: var(--borderHighlight) !important;
+}
+
+#acb-super-state[data-phase="second"]:not([data-state="attention"]),
+#acb-auto-state[data-phase="second"] {
+  background: var(--warning) !important;
+  color: var(--textPrimary) !important;
+  border-color: var(--borderHighlight) !important;
+}
+
+#acb-super-state[data-phase="performance"]:not([data-state="attention"]),
+#acb-auto-state[data-phase="performance"] {
+  background: var(--accentTealDeep) !important;
+  color: var(--borderHighlight) !important;
+  border-color: var(--accentTeal) !important;
+}
+
+#acb-super-state[data-phase="done"],
+#acb-auto-state[data-phase="done"] {
+  background: var(--success) !important;
+  color: var(--textPrimary) !important;
+  border-color: var(--bevelLight) !important;
+}
+
+/* HOLD keeps the underlying stage color; teal border means temporary recovery. */
+#acb-super-state[data-hold="true"]:not([data-state="attention"]),
+#acb-auto-state[data-hold="true"] {
+  border-color: var(--accentTeal) !important;
+}
+
+
+
+
+/* ACBBridge */
+#acb-bridge-config {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  gap: 4px !important;
+}
+#acb-bridge-config .acb-bridge-wide {
+  grid-column: 1 / -1 !important;
+}
+#acb-bridge-config input[type="text"],
+#acb-bridge-config input[type="password"] {
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 24px !important;
+}
+#acb-bridge-state {
+  min-height: 22px !important;
+  margin-top: 4px !important;
+  padding: 3px 4px !important;
+  background: var(--compareBack) !important;
+  color: var(--textSecondary) !important;
+  border: 1px solid var(--borderMuted) !important;
+  font-size: 10px !important;
+  overflow: hidden !important;
+  white-space: nowrap !important;
+  text-overflow: ellipsis !important;
+}
+#acb-bridge-state[data-state="ready"] {
+  color: var(--textPrimary) !important;
+  border-color: var(--success) !important;
+}
+#acb-bridge-state[data-state="error"] {
+  color: var(--dangerText) !important;
+  border-color: var(--danger) !important;
+}
+#acb-bridge-state[data-state="warning"] {
+  color: var(--borderHighlight) !important;
+  border-color: var(--warning) !important;
+}
+#acb-browser-fallback {
+  margin-top: 6px !important;
+  padding-top: 5px !important;
+  border-top: 1px solid var(--borderMuted) !important;
+}
+#acb-audit-output-controls,
+#acb-fallback-output-controls {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  gap: 4px !important;
+}
+.acb-check-row {
+  min-height: 24px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  padding: 3px 4px !important;
+  background: var(--surface) !important;
+  border: 1px solid var(--borderMuted) !important;
+  color: var(--textPrimary) !important;
+  font-size: 10px !important;
+  cursor: pointer !important;
+}
+.acb-check-row input {
+  width: 14px !important;
+  min-width: 14px !important;
+  height: 14px !important;
+  min-height: 14px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  appearance: auto !important;
+  accent-color: var(--accentTeal) !important;
+}
+#acb-audit-folder-state {
+  min-height: 26px !important;
+  margin-top: 4px !important;
+  padding: 3px 4px !important;
+  background: var(--compareBack) !important;
+  color: var(--textSecondary) !important;
+  border: 1px solid var(--borderMuted) !important;
+  font-size: 10px !important;
+  overflow: hidden !important;
+}
+#acb-audit-folder-state[data-state="ready"] { color: var(--textPrimary) !important; border-color: var(--success) !important; }
+#acb-audit-folder-state[data-state="warning"] { color: var(--borderHighlight) !important; border-color: var(--warning) !important; }
+#acb-audit-folder-state[data-state="error"] { color: var(--dangerText) !important; border-color: var(--danger) !important; }
 /* SETTINGS */
 #acb-displaybar {
   display: grid !important;
@@ -726,8 +1390,62 @@
   let autoAuditCheckTimer = 0;
   let autoAuditNextTimer = 0;
   let autoAuditEvaluating = false;
+  let autoLastEvaluationAt = 0;
+
+  let autoComposerHoldReason = '';
+  let autoComposerHoldSince = 0;
+  let autoComposerHoldAttempts = 0;
+  let autoComposerHoldTimer = 0;
   let autoRuntime = null;
+  let auditDirectoryHandle = null;
+  let auditDirectoryState = 'unknown';
+  let auditDirectoryMessage = 'Audit folder has not been checked yet.';
+
+  let bridgeState = 'unknown';
+  let bridgeMessage = 'Bridge has not been checked yet.';
+  let bridgeOutputRoot = '';
+  let bridgeServerVersion = '';
+  let bridgeLastCheckedAt = 0;
+  let bridgeFlushTimer = 0;
+  let bridgeFlushInFlight = false;
+  let bridgeQueueListenerId = null;
+  let auditResultListenerId = null;
+
+  let copiedAuditKind = '';
+  let copiedAuditUntil = 0;
+  let copiedAuditTimer = 0;
+
+  let auditStartInFlight = false;
+  let manualAuditSyncInFlight = false;
+  let manualAuditSyncFeedback = '';
+  let manualAuditSyncFeedbackUntil = 0;
+  let manualAuditSyncFeedbackTimer = 0;
+  let startRecoveryScheduleToken = '';
+
+  let conversationTitleGuardToken = '';
+  let conversationTitleGuardStartedAt = 0;
+  let conversationTitleGuardProject = '';
+  let conversationTitleGuardConversationKey = '';
+  let conversationTitleGuardRunStartedAt = 0;
+  let renameRateLimitNoticeAt = 0;
+  let autoRouteTransientSince = 0;
+  let lastLocalTitleApplyAt = 0;
+  let projectTitleObserver = null;
+  let projectTitleObserverLink = null;
+  let projectTitleRepairTimer = 0;
+  let widgetGuardianObserver = null;
+  let widgetGuardianBody = null;
+  let widgetBootstrapObserver = null;
+  let widgetBootstrapTimers = [];
+
+  // v0.0.26: Mini START must never render on every ChatGPT DOM mutation.
+  // Keep a cheap attachment signature and only repaint when the actual
+  // composer attachment state changes.
+  let miniAttachmentSignature = '';
+  let miniAttachmentRefreshTimer = 0;
+  const auditResultCache = new Map();
   let autoBoundConversationKey = '';
+  let autoRuntimeCorruptKey = '';
   let autoLeaseTimer = 0;
   const autoTabId = (() => {
     try {
@@ -989,31 +1707,46 @@
     return nativeAppend(element, text);
   }
 
-  function chatGPTComposerRoot() {
-    const canonical = document.querySelector('form[data-type="unified-composer"]');
-    if (canonical && isVisible(canonical)) return canonical;
+  const CHATGPT_SEND_SELECTOR = [
+    '#composer-submit-button',
+    '[data-testid="send-button"]',
+    '[data-testid="composer-submit-button"]',
+    'button[aria-label="Send prompt"]',
+    'button[aria-label="Send message"]',
+    'button[aria-label="Send"]',
+    'button.composer-submit-btn'
+  ].join(', ');
 
-    const input = document.querySelector(
+  function rawChatGPTComposerInput() {
+    const candidates = document.querySelectorAll(
       '#prompt-textarea[contenteditable="true"][role="textbox"], ' +
       '#prompt-textarea.ProseMirror[contenteditable="true"], ' +
       '[contenteditable="true"][role="textbox"][aria-label="Chat with ChatGPT"]'
     );
-    if (!input || !isVisible(input)) return null;
+    for (const input of candidates) {
+      if (!input || !isVisible(input)) continue;
+      if (input.closest('[data-testid^="conversation-turn-"], article[data-testid], article')) continue;
+      return input;
+    }
+    return null;
+  }
 
-    // Never accept an editor embedded in a conversation turn. When ChatGPT is
-    // editing an old message, that editor is not the bottom unified composer.
-    if (input.closest('[data-testid^="conversation-turn-"], article[data-testid], article')) return null;
+  function chatGPTComposerRoot() {
+    const canonical = document.querySelector('form[data-type="unified-composer"]');
+    if (canonical && isVisible(canonical)) return canonical;
 
+    const input = rawChatGPTComposerInput();
+    if (!input) return null;
+
+    // The current ChatGPT build can render the send control in a sibling shell
+    // while the prompt editor remains inside the form. The editor itself is
+    // sufficient to identify the bottom composer; send discovery is fenced
+    // separately against stable ids/testids and composer proximity.
     const form = input.closest('form');
-    if (!form || !isVisible(form)) return null;
+    if (form && isVisible(form)) return form;
 
-    // Fallback root is accepted only when it owns a real ChatGPT send control.
-    const send = form.querySelector(
-      '[data-testid="send-button"], ' +
-      'button[aria-label="Send prompt"], ' +
-      'button.composer-submit-btn'
-    );
-    return send ? form : null;
+    const shell = input.closest('[data-type="unified-composer"], [data-testid*="composer" i]');
+    return shell && isVisible(shell) ? shell : null;
   }
 
   function isChatGPTComposerInput(element) {
@@ -1045,30 +1778,78 @@
     return null;
   }
 
+  function chatGPTSendNearComposer(element, root = chatGPTComposerRoot()) {
+    if (!element || !isVisible(element)) return false;
+    if (element.closest('[data-testid^="conversation-turn-"], article[data-testid], article')) return false;
+    if (root?.contains(element)) return true;
+
+    // Stable ChatGPT ids/testids are globally unique enough to survive builds
+    // where the button is rendered just outside the <form>.
+    if (element.matches('#composer-submit-button, [data-testid="send-button"], [data-testid="composer-submit-button"]')) {
+      return true;
+    }
+
+    const input = rawChatGPTComposerInput();
+    if (!input) return false;
+    const inputForm = input.closest('form');
+    const buttonForm = element.closest('form');
+    if (inputForm && buttonForm && inputForm === buttonForm) return true;
+
+    // Locale/A-B fallbacks without a stable id are accepted only when they sit
+    // in the same nearby composer shell, never merely because the page has a
+    // random "Send" button elsewhere.
+    let ancestor = input.parentElement;
+    for (let depth = 0; ancestor && depth < 7; depth += 1, ancestor = ancestor.parentElement) {
+      if (ancestor === document.body || ancestor === document.documentElement) break;
+      if (ancestor.contains(element)) return true;
+    }
+    return false;
+  }
+
   function isChatGPTSend(element) {
     if (!element || !isVisible(element)) return false;
-    const root = chatGPTComposerRoot();
-    if (!root || !root.contains(element)) return false;
-    if (element.closest('[data-testid^="conversation-turn-"], article[data-testid], article')) return false;
-    return element.matches(
-      '[data-testid="send-button"], button[aria-label="Send prompt"], button.composer-submit-btn'
-    );
+    if (!element.matches(CHATGPT_SEND_SELECTOR) && element.getAttribute('type') !== 'submit') return false;
+    return chatGPTSendNearComposer(element);
   }
 
   function getChatGPTSend() {
     const root = chatGPTComposerRoot();
-    if (!root) return null;
 
-    const candidates = [
-      root.querySelector('[data-testid="send-button"]'),
-      root.querySelector('button[aria-label="Send prompt"]'),
-      root.querySelector('button.composer-submit-btn')
-    ];
-
-    for (const candidate of candidates) {
-      if (candidate && isChatGPTSend(candidate)) return candidate;
+    // First use the live composer subtree when possible.
+    if (root) {
+      for (const candidate of root.querySelectorAll(CHATGPT_SEND_SELECTOR)) {
+        if (isChatGPTSend(candidate)) return candidate;
+      }
     }
-    return null;
+
+    // Then allow the stable ChatGPT id/testid to live just outside the form.
+    // This is a real current-A/B DOM shape and was the reason START could
+    // prepare the audit perfectly while never finding the visibly enabled arrow.
+    for (const candidate of document.querySelectorAll(
+      '#composer-submit-button, [data-testid="send-button"], [data-testid="composer-submit-button"]'
+    )) {
+      if (isChatGPTSend(candidate)) return candidate;
+    }
+
+    // Exact aria-label fallbacks are proximity-fenced to the live composer.
+    for (const candidate of document.querySelectorAll(
+      'button[aria-label="Send prompt"], button[aria-label="Send message"], button[aria-label="Send"]'
+    )) {
+      if (isChatGPTSend(candidate)) return candidate;
+    }
+
+    // Last-resort submit discovery: allow either the root or the editor's form,
+    // but still reject non-send semantic controls.
+    const submitScope = root || rawChatGPTComposerInput()?.closest('form');
+    if (!submitScope) return null;
+    const submitCandidates = Array.from(submitScope.querySelectorAll('button[type="submit"]')).filter(candidate => {
+      if (!candidate || !isVisible(candidate)) return false;
+      if (candidate.closest('[data-testid^="conversation-turn-"], article[data-testid], article')) return false;
+      const semantic = `${candidate.id || ''} ${candidate.getAttribute('aria-label') || ''} ${candidate.getAttribute('data-testid') || ''} ${candidate.className || ''}`.toLowerCase();
+      if (/(voice|dictat|microphone|record|stop|cancel|retry|attach|upload|tool)/i.test(semantic)) return false;
+      return chatGPTSendNearComposer(candidate, root);
+    });
+    return submitCandidates.length === 1 ? submitCandidates[0] : null;
   }
 
 
@@ -1085,6 +1866,179 @@
     return Array.from(root.querySelectorAll('[role="group"][aria-label]')).filter(tile => {
       return Boolean(tile.querySelector('button[aria-label^="Remove file"], button[name="expand-file-tile"]'));
     });
+  }
+
+  function chatGPTReadyComposerAttachments(root = chatGPTComposerRoot()) {
+    if (!root || root.hasAttribute('inert')) return [];
+
+    return chatGPTComposerAttachmentTiles(root).filter(tile => {
+      if (!tile?.isConnected || !isVisible(tile) || chatGPTAttachmentIsBusy(tile)) return false;
+
+      const label = String(tile.getAttribute('aria-label') || '').trim();
+      if (!label) return false;
+
+      // Exclude AI ChatButtons' own generated command attachment if it is
+      // briefly still visible around Send. START must represent the user's
+      // project/archive/file, not our AUDIT_CORE_*.md instruction file.
+      if (/^AUDIT_(?:CORE|SECOND_WAVE|PERFORMANCE)_[A-Za-z0-9_-]+\.md$/i.test(label)) {
+        return false;
+      }
+      return true;
+    });
+  }
+
+  function acbElementFromNode(node) {
+    if (!node) return null;
+    if (node.nodeType === 1) return node;
+    return node.parentElement || null;
+  }
+
+  function mutationTargetsOwnWidget(mutation) {
+    const target = acbElementFromNode(mutation?.target);
+    return Boolean(panel && target && (target === panel || panel.contains(target)));
+  }
+
+  function externalMutationRecords(records) {
+    return Array.from(records || []).filter(record => !mutationTargetsOwnWidget(record));
+  }
+
+  function mutationTouchesNode(record, root) {
+    if (!record || !root) return false;
+
+    const target = acbElementFromNode(record.target);
+    if (target && (target === root || root.contains(target) || target.contains?.(root))) {
+      return true;
+    }
+
+    for (const node of [...Array.from(record.addedNodes || []), ...Array.from(record.removedNodes || [])]) {
+      const element = acbElementFromNode(node);
+      if (!element) continue;
+      if (element === root || root.contains(element) || element.contains?.(root)) return true;
+    }
+
+    return false;
+  }
+
+  function composerAttachmentSignature(root = chatGPTComposerRoot()) {
+    if (!root || root.hasAttribute('inert')) return 'composer:none';
+
+    const tiles = chatGPTComposerAttachmentTiles(root);
+    if (!tiles.length) return 'composer:0';
+
+    return `composer:${tiles.map(tile => {
+      const name = String(tile.getAttribute('aria-label') || '').trim().toLowerCase();
+      const busy = chatGPTAttachmentIsBusy(tile) ? '1' : '0';
+      return `${name}|${busy}`;
+    }).sort().join('||')}`;
+  }
+
+  function scheduleMiniAttachmentRefresh(records = []) {
+    if (
+      !state?.superCompact ||
+      detectSite().key !== 'chatgpt' ||
+      autoRuntime?.stage !== 'idle'
+    ) return;
+
+    const external = externalMutationRecords(records);
+    if (!external.length) return;
+
+    const composer = chatGPTComposerRoot();
+    if (!composer) {
+      // Composer replacement can temporarily produce a null root. Only repaint
+      // when that changes the cached signature, and do it once after the batch.
+      if (miniAttachmentSignature !== 'composer:none' && !miniAttachmentRefreshTimer) {
+        miniAttachmentRefreshTimer = setTimeout(() => {
+          miniAttachmentRefreshTimer = 0;
+          const signature = composerAttachmentSignature();
+          if (signature === miniAttachmentSignature) return;
+          miniAttachmentSignature = signature;
+          reconcileProjectIdentityFromComposer({ rename: true });
+          renderAutoAuditState();
+        }, 80);
+      }
+      return;
+    }
+
+    if (!external.some(record => mutationTouchesNode(record, composer))) return;
+    if (miniAttachmentRefreshTimer) return;
+
+    miniAttachmentRefreshTimer = setTimeout(() => {
+      miniAttachmentRefreshTimer = 0;
+      const signature = composerAttachmentSignature();
+      if (signature === miniAttachmentSignature) return;
+      miniAttachmentSignature = signature;
+      reconcileProjectIdentityFromComposer({ rename: true });
+      renderAutoAuditState();
+    }, 80);
+  }
+
+  function chatGPTReadyAttachmentSummary() {
+    if (detectSite().key !== 'chatgpt') {
+      return { ready: false, count: 0, names: [], reason: 'ChatGPT only.' };
+    }
+
+    const root = chatGPTComposerRoot();
+    if (!root || root.hasAttribute('inert')) {
+      return { ready: false, count: 0, names: [], reason: 'Main ChatGPT composer is not available.' };
+    }
+
+    const allTiles = chatGPTComposerAttachmentTiles(root);
+    const readyTiles = chatGPTReadyComposerAttachments(root);
+    const names = readyTiles
+      .map(tile => String(tile.getAttribute('aria-label') || '').trim())
+      .filter(Boolean);
+
+    if (readyTiles.length) {
+      return {
+        ready: true,
+        count: readyTiles.length,
+        names,
+        reason: `${readyTiles.length} project attachment${readyTiles.length === 1 ? '' : 's'} ready.`
+      };
+    }
+
+    if (allTiles.some(tile => chatGPTAttachmentIsBusy(tile))) {
+      return {
+        ready: false,
+        count: 0,
+        names: [],
+        reason: 'Attachment is still registering with ChatGPT.'
+      };
+    }
+
+    return {
+      ready: false,
+      count: 0,
+      names: [],
+      reason: 'Attach a project/archive/file to enable START AUDITING.'
+    };
+  }
+
+  function miniStartAuditState() {
+    if (!state?.superCompact || detectSite().key !== 'chatgpt') {
+      return { available: false, busy: false, attachment: null, retryPrepared: false };
+    }
+
+    const prepared = readStartAuditHandoff();
+    if (startHandoffIsPrepared(prepared) && startHandoffComposerStillPrepared(prepared)) {
+      return {
+        available: !auditStartInFlight && !actionInFlight && !chatGPTIsGenerating(),
+        busy: auditStartInFlight || actionInFlight,
+        attachment: chatGPTReadyAttachmentSummary(),
+        retryPrepared: true
+      };
+    }
+
+    if (autoRuntime && autoRuntime.stage !== 'idle') {
+      return { available: false, busy: false, attachment: null, retryPrepared: false };
+    }
+    if (auditStartInFlight || actionInFlight) {
+      return { available: false, busy: true, attachment: chatGPTReadyAttachmentSummary(), retryPrepared: false };
+    }
+    if (chatGPTIsGenerating()) return { available: false, busy: false, attachment: null, retryPrepared: false };
+
+    const attachment = chatGPTReadyAttachmentSummary();
+    return { available: Boolean(attachment.ready), busy: false, attachment, retryPrepared: false };
   }
 
   function chatGPTFindComposerAttachment(filename, root = chatGPTComposerRoot()) {
@@ -1213,7 +2167,7 @@
     }
   }
 
-  async function attachChatGPTPromptFile(preset, input) {
+  async function attachChatGPTPromptFile(preset, input, options = {}) {
     const root = chatGPTComposerRoot();
     if (!root || !input || !root.contains(input) || root.hasAttribute('inert')) {
       return { ok: false, reason: 'composer-unavailable' };
@@ -1258,6 +2212,9 @@
 
     const marker = promptAttachmentMarker(preset, filename);
     const current = composerPlainText(input);
+    if (options.canonicalComposerOnly && cleanTurnText(current)) {
+      return { ok: false, reason: 'composer-changed-before-marker', filename };
+    }
     if (!current.includes(filename)) {
       if (!smartAppend(input, marker)) {
         return { ok: false, reason: 'marker-write-rejected', filename };
@@ -1268,12 +2225,30 @@
   }
 
   async function waitForChatGPTSendReady(timeoutMs = CHATGPT_ATTACHMENT_TIMEOUT_MS) {
-    const root = chatGPTComposerRoot();
-    if (!root) return null;
-    return waitForDomCondition(root, () => {
+    // Do not observe one captured composer root for the whole attachment wait.
+    // ChatGPT can replace the unified-composer subtree while an injected file is
+    // being registered. The old root then receives no more mutations, leaving a
+    // visibly enabled Send button in the NEW root while this function sleeps all
+    // the way to timeout. Re-resolve the live composer/button on every probe.
+    const deadline = Date.now() + Math.max(1, Number(timeoutMs) || CHATGPT_ATTACHMENT_TIMEOUT_MS);
+    while (Date.now() < deadline) {
       const button = getChatGPTSend();
-      return button && !button.disabled && button.getAttribute('aria-disabled') !== 'true' ? button : null;
-    }, timeoutMs);
+      if (
+        button &&
+        button.isConnected &&
+        isVisible(button) &&
+        !button.disabled &&
+        button.getAttribute('aria-disabled') !== 'true'
+      ) return button;
+
+      await sleep(Math.min(120, Math.max(20, deadline - Date.now())));
+    }
+
+    const button = getChatGPTSend();
+    return button && button.isConnected && isVisible(button) &&
+      !button.disabled && button.getAttribute('aria-disabled') !== 'true'
+      ? button
+      : null;
   }
 
   const SITES = {
@@ -1467,6 +2442,7 @@
       popupPos: { x: 16, y: 72 },
       posLocked: false,
       collapsed: false,
+      superCompact: false,
       opacity: 100,
       panelSize: 'normal',
       autoAuditEnabled: false,
@@ -1474,6 +2450,10 @@
       autoAuditDelayMs: 1200,
       autoAuditTimeoutMin: 180,
       chatgptPromptDelivery: 'auto',
+      autoRenameChat: true,
+      autoSaveAuditFiles: true,
+      bridgeEnabled: true,
+      bridgeUrl: BRIDGE_DEFAULT_URL,
       activeCategoryId: audit.id,
       categories: [audit]
     };
@@ -1640,6 +2620,7 @@
         : { x: 16, y: 72 },
       posLocked: Boolean(data.posLocked),
       collapsed: Boolean(data.collapsed),
+      superCompact: Boolean(data.superCompact),
       opacity: OPACITY_LEVELS.includes(Number(data.opacity)) ? Number(data.opacity) : 100,
       panelSize: Object.prototype.hasOwnProperty.call(PANEL_SIZES, String(data.panelSize || ''))
         ? String(data.panelSize)
@@ -1655,6 +2636,10 @@
       chatgptPromptDelivery: CHATGPT_PROMPT_DELIVERY_MODES.includes(String(data.chatgptPromptDelivery || ''))
         ? String(data.chatgptPromptDelivery)
         : 'auto',
+      autoRenameChat: data.autoRenameChat !== false,
+      autoSaveAuditFiles: true, // invariant: every COMPLETE audit is always queued for persistence
+      bridgeEnabled: data.bridgeEnabled !== false,
+      bridgeUrl: String(data.bridgeUrl || BRIDGE_DEFAULT_URL),
       activeCategoryId: String(data.activeCategoryId || ''),
       categories
     };
@@ -1769,13 +2754,20 @@
     const selected = PANEL_SIZES[state.panelSize] || PANEL_SIZES.normal;
     const availableWidth = Math.max(1, viewport.width - (PANEL_EDGE_MARGIN * 2));
     const availableHeight = Math.max(1, viewport.height - (PANEL_EDGE_MARGIN * 2));
-    const width = Math.max(1, Math.min(selected.width, availableWidth));
+    const normalWidth = Math.max(1, Math.min(selected.width, availableWidth));
     const expandedHeight = Math.max(1, Math.min(selected.height, availableHeight));
+    const superCompact = Boolean(state.superCompact);
 
     return {
       viewport,
-      width,
-      height: state.collapsed ? Math.min(24, availableHeight) : expandedHeight,
+      width: superCompact
+        ? Math.max(1, Math.min(SUPER_COMPACT_WIDTH, availableWidth))
+        : normalWidth,
+      height: superCompact
+        ? Math.max(1, Math.min(SUPER_COMPACT_HEIGHT, availableHeight))
+        : state.collapsed
+          ? Math.min(24, availableHeight)
+          : expandedHeight,
       maxWidth: availableWidth,
       maxHeight: availableHeight
     };
@@ -1785,6 +2777,7 @@
     if (!panel) return geometry;
 
     panel.dataset.collapsed = state.collapsed ? 'true' : 'false';
+    panel.dataset.supercompact = state.superCompact ? 'true' : 'false';
     panel.style.setProperty('width', `${geometry.width}px`, 'important');
     panel.style.setProperty('height', `${geometry.height}px`, 'important');
     panel.style.setProperty('max-width', `${geometry.maxWidth}px`, 'important');
@@ -1796,6 +2789,15 @@
       collapse.textContent = state.collapsed ? 'Expand' : 'Collapse';
       collapse.setAttribute('aria-expanded', state.collapsed ? 'false' : 'true');
       collapse.title = state.collapsed ? 'Expand the widget' : 'Collapse the widget to the title bar';
+    }
+
+    const superToggle = panel.querySelector('#acb-super-toggle');
+    if (superToggle) {
+      superToggle.textContent = state.superCompact ? 'Full' : 'Mini';
+      superToggle.setAttribute('aria-pressed', state.superCompact ? 'true' : 'false');
+      superToggle.title = state.superCompact
+        ? 'Restore the full AI ChatButtons widget'
+        : 'Switch to the one-line Auto3 monitor';
     }
 
     const opacity = panel.querySelector('#acb-opacity');
@@ -2138,9 +3140,101 @@
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
+  function chatGPTComposerReceiptState(receipt) {
+    const wanted = String(receipt || '').trim();
+    if (!wanted) return 'no-receipt';
+    const input = rawChatGPTComposerInput();
+    if (!input) return 'composer-unavailable';
+    return composerPlainText(input).includes(`${AUTO_SEND_RECEIPT_PREFIX}: ${wanted}`)
+      ? 'present-with-receipt'
+      : 'present-without-receipt';
+  }
+
+  function chatGPTComposerStillContainsReceipt(receipt) {
+    return chatGPTComposerReceiptState(receipt) === 'present-with-receipt';
+  }
+
+  async function chatGPTSendAccepted(receipt = '', beforeText = '', timeoutMs = 900) {
+    const wanted = String(receipt || '').trim();
+    const baseline = cleanTurnText(beforeText || '');
+    const deadline = Date.now() + Math.max(120, Number(timeoutMs) || 900);
+    let observedPreparedComposer = false;
+
+    while (Date.now() < deadline) {
+      if (wanted) {
+        if (exactReceiptUserTurn(wanted, getChatGPTTurns())) return true;
+        const state = chatGPTComposerReceiptState(wanted);
+        if (state === 'present-with-receipt') observedPreparedComposer = true;
+        if (state === 'present-without-receipt' && observedPreparedComposer) return true;
+        // composer-unavailable is deliberately UNKNOWN. React can replace the
+        // composer during hydration without having submitted the authored turn.
+      } else {
+        const live = rawChatGPTComposerInput();
+        if (live) {
+          const current = cleanTurnText(composerPlainText(live));
+          if (baseline && current !== baseline) return true;
+        }
+      }
+      if (chatGPTIsGenerating()) return true;
+      await sleep(60);
+    }
+    return false;
+  }
+
+  async function clickChatGPTSendVerified(button, input, options = {}) {
+    if (!button || !button.isConnected || button.disabled || button.getAttribute('aria-disabled') === 'true') {
+      return false;
+    }
+
+    const receipt = String(options.receipt || '');
+    const beforeText = composerPlainText(input || rawChatGPTComposerInput());
+    const ownership = options.autoOwnership || null;
+    const fence = typeof options.fence === 'function' ? options.fence : null;
+    if (ownership && !(await ownership.verify())) return false;
+    if (fence && !(await fence())) return false;
+
+    try { button.focus({ preventScroll: true }); } catch (_) { }
+    if (ownership && !(await ownership.verify())) return false;
+    if (fence && !(await fence())) return false;
+    try { button.click(); } catch (_) { }
+
+    if (await chatGPTSendAccepted(receipt, beforeText, 900)) return true;
+
+    const liveInput = rawChatGPTComposerInput();
+    const receiptState = receipt ? chatGPTComposerReceiptState(receipt) : '';
+    const stillPrepared = receipt
+      ? receiptState === 'present-with-receipt'
+      : Boolean(liveInput && cleanTurnText(composerPlainText(liveInput)) === cleanTurnText(beforeText));
+
+    // A temporarily missing composer is not send acceptance and also is not a
+    // safe moment to requestSubmit an old/stale form reference.
+    if (receipt && receiptState === 'composer-unavailable') return false;
+    if (!receipt && !liveInput) return false;
+    if (!stillPrepared) return true;
+    if (ownership && !(await ownership.verify())) return false;
+    if (fence && !(await fence())) return false;
+
+    const form = button.closest('form') || liveInput?.closest('form');
+    if (form && typeof form.requestSubmit === 'function') {
+      try {
+        if (button.closest('form') === form && button.getAttribute('type') === 'submit') {
+          form.requestSubmit(button);
+        } else {
+          form.requestSubmit();
+        }
+      } catch (_) { }
+      if (await chatGPTSendAccepted(receipt, beforeText, 1200)) return true;
+    }
+
+    return false;
+  }
+
   async function triggerSend(site, input, options = {}) {
     const waitForReadyMs = Number(options.waitForReadyMs) || 0;
     const fence = typeof options.fence === 'function' ? options.fence : null;
+    const beforeClick = typeof options.beforeClick === 'function'
+      ? options.beforeClick
+      : null;
 
     const fenceCheck = async () => {
       if (!fence) return true;
@@ -2151,12 +3245,26 @@
       }
     };
 
+    const beforeClickCheck = async () => {
+      if (!beforeClick) return true;
+      try {
+        return Boolean(await beforeClick());
+      } catch (_) {
+        return false;
+      }
+    };
+
     if (site?.key === 'chatgpt' && waitForReadyMs > 0) {
       const ready = await waitForChatGPTSendReady(waitForReadyMs);
       if (ready) {
         if (!(await fenceCheck())) return { ok: false, mode: 'ownership-lost' };
-        ready.click();
-        return { ok: true, mode: 'button' };
+        if (!(await beforeClickCheck())) return { ok: false, mode: 'pre-click-checkpoint-failed' };
+        const accepted = site?.key === 'chatgpt'
+          ? await clickChatGPTSendVerified(ready, input, { receipt: options.receipt, fence: fenceCheck })
+          : (ready.click(), true);
+        return accepted
+          ? { ok: true, mode: 'button' }
+          : { ok: false, mode: 'click-unverified' };
       }
     } else {
       const retryDelays = [0, 35, 70, 120, 180, 260];
@@ -2165,8 +3273,13 @@
         const button = cachedSiteElement(site, 'send');
         if (button && !button.disabled && button.getAttribute('aria-disabled') !== 'true') {
           if (!(await fenceCheck())) return { ok: false, mode: 'ownership-lost' };
-          button.click();
-          return { ok: true, mode: 'button' };
+          if (!(await beforeClickCheck())) return { ok: false, mode: 'pre-click-checkpoint-failed' };
+          const accepted = site?.key === 'chatgpt'
+            ? await clickChatGPTSendVerified(button, input, { receipt: options.receipt, fence: fenceCheck })
+            : (button.click(), true);
+          return accepted
+            ? { ok: true, mode: 'button' }
+            : { ok: false, mode: 'click-unverified' };
         }
       }
     }
@@ -2176,6 +3289,7 @@
     }
 
     if (!(await fenceCheck())) return { ok: false, mode: 'ownership-lost' };
+    if (!(await beforeClickCheck())) return { ok: false, mode: 'pre-click-checkpoint-failed' };
 
     try {
       input.dispatchEvent(new KeyboardEvent('keydown', {
@@ -2231,8 +3345,19 @@
         return { ok: false, sent: false, reason: 'composer-changed' };
       }
 
+      if (site?.key === 'chatgpt' && auditKindFromPreset(preset) === 'core') {
+        reconcileProjectIdentityFromComposer({ rename: true });
+      }
+
       const attachmentDelivery = shouldUseChatGPTPromptAttachment(site, preset);
       let attachment = null;
+      let deliveryText = '';
+      let canonicalExpectedText = '';
+
+      const canonicalComposerMatches = () => {
+        if (!options.canonicalComposerOnly) return true;
+        return cleanTurnText(composerPlainText(input)) === cleanTurnText(canonicalExpectedText);
+      };
 
       if (options.autoOwnership && !(await options.autoOwnership.verify())) {
         setStatus(`Automatic send for ${preset.name} was canceled because this tab lost Auto3 ownership or the composer was changed before insertion. Nothing was written or sent.`, 'warning');
@@ -2241,13 +3366,20 @@
 
       if (attachmentDelivery) {
         setStatus(`Attaching ${preset.name} as a prompt file so ChatGPT does not parse the full text in ProseMirror...`, 'info');
-        attachment = await attachChatGPTPromptFile(preset, input);
+        attachment = await attachChatGPTPromptFile(preset, input, {
+          canonicalComposerOnly: Boolean(options.canonicalComposerOnly)
+        });
         if (!attachment.ok) {
           setStatus(`Could not attach ${preset.name} as a file (${attachment.reason}). The large prompt was NOT pasted into the editor, preventing a UI freeze. Change Delivery to Text only if you explicitly want raw text.`, 'error');
           return { ok: false, sent: false, reason: attachment.reason, delivery: 'attachment' };
         }
+        canonicalExpectedText = attachment.marker || '';
       } else {
-        const deliveryText = preset?.machineReceipt
+        if (options.canonicalComposerOnly && cleanTurnText(composerPlainText(input))) {
+          setStatus(`Automatic ${preset.name} was canceled because the composer changed before canonical insertion. Existing text was not merged into the audit command.`, 'warning');
+          return { ok: false, sent: false, reason: 'canonical-composer-changed' };
+        }
+        deliveryText = preset?.machineReceipt
           ? `${preset.text}\n\n${AUTO_SEND_RECEIPT_PREFIX}: ${preset.machineReceipt}`
           : preset.text;
         const appended = smartAppend(input, deliveryText);
@@ -2256,6 +3388,12 @@
           setStatus(`Could not write to the ${siteLabel} composer. The page editor rejected scripted input; click the composer once and retry.`, 'error');
           return { ok: false, sent: false, reason: 'write-rejected' };
         }
+        canonicalExpectedText = deliveryText;
+      }
+
+      if (options.canonicalComposerOnly && !canonicalComposerMatches()) {
+        setStatus(`Automatic ${preset.name} was canceled because unexpected composer text appeared during preparation. Nothing was sent.`, 'warning');
+        return { ok: false, sent: false, reason: 'canonical-composer-changed' };
       }
 
       if (mode === 'append') {
@@ -2273,6 +3411,11 @@
         ? `Attached ${preset.name} as ${attachment.filename}. Waiting for ChatGPT to finish registering the attachment and enable Send...`
         : `Inserted ${preset.name}. Waiting briefly for the ${siteLabel} Send control...`, 'info');
       await yieldToBrowser();
+
+      if (options.canonicalComposerOnly && !canonicalComposerMatches()) {
+        setStatus(`Automatic ${preset.name} was canceled because the composer changed after preparation. Nothing was sent.`, 'warning');
+        return { ok: false, sent: false, reason: 'canonical-composer-changed' };
+      }
 
       if (typeof options.beforeSend === 'function') {
         let permitted = false;
@@ -2293,17 +3436,52 @@
 
       const result = await triggerSend(site, input, {
         waitForReadyMs: attachmentDelivery ? CHATGPT_ATTACHMENT_TIMEOUT_MS : 0,
-        fence: options.autoOwnership
-          ? () => options.autoOwnership.verify()
-          : undefined
+        fence: (options.autoOwnership || options.canonicalComposerOnly)
+          ? async () => {
+            if (options.canonicalComposerOnly && !canonicalComposerMatches()) return false;
+            if (options.autoOwnership && !(await options.autoOwnership.verify())) return false;
+            return true;
+          }
+          : undefined,
+        beforeClick: options.beforeClick,
+        receipt: String(preset?.machineReceipt || '')
       });
       if (result.mode === 'ownership-lost') {
         setStatus(`Automatic Send for ${preset.name} was canceled immediately before the click because this tab no longer owns Auto3 or the composer content changed. Nothing was sent.`, 'warning');
         return { ok: false, sent: false, reason: 'ownership-lost' };
       }
+      if (result.mode === 'pre-click-checkpoint-failed') {
+        setStatus(`Send for ${preset.name} was canceled before the click because its final durable START checkpoint could not be saved. Nothing was sent.`, 'error');
+        return { ok: false, sent: false, reason: 'pre-click-checkpoint-failed' };
+      }
       if (result.ok) {
         setStatus(`Run triggered: ${preset.name}. The ${siteLabel} Send control was clicked.`, 'success');
+        if (site?.key === 'chatgpt' && auditKindFromPreset(preset) === 'core') {
+          const sentReceipt = String(preset?.machineReceipt || '');
+          setTimeout(() => {
+            try {
+              bindAutoRuntimeToCurrentConversation({ claim: false });
+              const turns = getChatGPTTurns();
+              const latestUser = latestChatGPTUserTurn(turns);
+              if (!latestUser || classifyAuditTurn(latestUser) !== 'core') return;
+              if (sentReceipt && !userTurnContainsReceipt(latestUser, sentReceipt)) return;
+              const projectName = projectNameFromCoreTurn(latestUser);
+              if (!projectName) return;
+              updateRuntimeProjectName(projectName, 'artifact');
+              maybeRenameConversation(projectName, {
+                source: 'artifact',
+                conversationKey: currentConversationKey(),
+                runStartedAt: autoRuntime?.startedAt || 0
+              }).catch(() => { });
+            } catch (_) { }
+          }, 700);
+        }
         return { ok: true, sent: true, mode: result.mode };
+      }
+
+      if (result.mode === 'click-unverified') {
+        setStatus(`The live ${siteLabel} Send control was found and invoked, but the prepared prompt did not leave the composer. START keeps the exact receipt armed and will retry through the alternate submit path instead of pretending Send succeeded.`, 'warning');
+        return { ok: false, sent: false, mode: result.mode, reason: 'send-click-unverified' };
       }
 
       if (result.mode === 'enter-fallback') {
@@ -2327,13 +3505,2640 @@
   }
 
 
+  function auditKindFromStep(step) {
+    const number = Number(step);
+    if (number === 1) return 'core';
+    if (number === 2) return 'second';
+    if (number === 3) return 'performance';
+    return '';
+  }
+
+  function auditWaveTitle(kind) {
+    if (kind === 'core') return 'AUDIT CORE';
+    if (kind === 'second') return 'AUDIT SECOND WAVE';
+    if (kind === 'performance') return 'AUDIT PERFORMANCE / STABILITY / EFFECTIVENESS';
+    return 'AUDIT';
+  }
+
+  function auditResultStorageKey(conversationKey, kind) {
+    return `${AUTO_AUDIT_RESULT_PREFIX}${String(conversationKey || 'unknown')}:${String(kind || 'unknown')}`;
+  }
+
+  function readAuditResultFresh(kind, conversationKey = autoBoundConversationKey || currentConversationKey()) {
+    const wantedKind = String(kind || '');
+    const wantedConversationKey = String(conversationKey || '');
+    if (!['core', 'second', 'performance'].includes(wantedKind) || !wantedConversationKey) return null;
+    const key = auditResultStorageKey(wantedConversationKey, wantedKind);
+    try {
+      const raw = GM_getValue(key, null);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (
+        !parsed ||
+        parsed.version !== 1 ||
+        String(parsed.kind || '') !== wantedKind ||
+        String(parsed.conversationKey || '') !== wantedConversationKey ||
+        typeof parsed.text !== 'string' ||
+        !parsed.text.trim()
+      ) return null;
+      return parsed;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function readAuditResult(kind, conversationKey = autoBoundConversationKey || currentConversationKey()) {
+    if (!kind || !conversationKey) return null;
+    const key = auditResultStorageKey(conversationKey, kind);
+    if (auditResultCache.has(key)) return auditResultCache.get(key);
+    const record = readAuditResultFresh(kind, conversationKey);
+    auditResultCache.set(key, record);
+    return record;
+  }
+
+  function signalAuditResultChange(conversationKey = '', kind = '') {
+    if (typeof GM_setValue !== 'function') return false;
+    try {
+      GM_setValue(AUTO_AUDIT_RESULT_SIGNAL_KEY, JSON.stringify({
+        conversationKey: String(conversationKey || ''),
+        kind: String(kind || ''),
+        source: autoInstanceId,
+        at: Date.now(),
+        nonce: Math.random().toString(36).slice(2, 10)
+      }));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function invalidateAuditResultCache(conversationKey = '') {
+    const wanted = String(conversationKey || '');
+    if (!wanted) {
+      auditResultCache.clear();
+      return;
+    }
+    for (const kind of ['core', 'second', 'performance']) {
+      auditResultCache.delete(auditResultStorageKey(wanted, kind));
+    }
+  }
+
+  function installAuditResultListener() {
+    if (auditResultListenerId !== null || typeof GM_addValueChangeListener !== 'function') return;
+    try {
+      auditResultListenerId = GM_addValueChangeListener(
+        AUTO_AUDIT_RESULT_SIGNAL_KEY,
+        (_name, _oldValue, newValue, remote) => {
+          // Tampermonkey reports remote=false for this same userscript instance.
+          // Ignore that echo: writeAuditResult() already updated its local cache.
+          if (remote === false) return;
+
+          let conversationKey = '';
+          try {
+            const payload = newValue ? JSON.parse(String(newValue)) : null;
+            conversationKey = String(payload?.conversationKey || '');
+          } catch (_) { }
+
+          invalidateAuditResultCache(conversationKey);
+          renderAutoAuditState();
+
+          const currentKey = autoBoundConversationKey || currentConversationKey();
+          if (
+            autoRuntime?.enabled &&
+            autoRuntime.stage === 'idle' &&
+            (!conversationKey || conversationKey === currentKey)
+          ) {
+            scheduleAutoAuditCheck(120);
+          }
+        }
+      );
+    } catch (_) {
+      auditResultListenerId = null;
+    }
+  }
+
+  function auditResultWriteMatchesCurrentRuntime(record) {
+    if (!record?.conversationKey) return false;
+
+    // Cross-tab callbacks can outlive the run that created them. The durable
+    // per-conversation runtime is the authority for whether a late result is
+    // still allowed to occupy the one-record-per-wave cache key.
+    const stored = readStoredRuntime(record.conversationKey);
+    const runtime = stored.runtime;
+    if (stored.corrupt) return false;
+    if (!runtime) return true;
+
+    // Explicit Reset is a durable lineage barrier. Until a fresh Core arms a
+    // new run, no historical tab/callback may resurrect cached audit evidence.
+    if (runtime.resetBarrierActive) return false;
+
+    const runtimeRunId = String(runtime.runId || '');
+    const recordRunId = String(record.runId || '');
+    if (runtimeRunId && runtimeRunId !== recordRunId) return false;
+    return true;
+  }
+
+  function writeAuditResult(record) {
+    if (
+      !record?.conversationKey ||
+      !['core', 'second', 'performance'].includes(String(record?.kind || '')) ||
+      typeof record?.text !== 'string' ||
+      !record.text.trim()
+    ) return false;
+    if (!auditResultWriteMatchesCurrentRuntime(record)) return false;
+
+    const key = auditResultStorageKey(record.conversationKey, record.kind);
+    try {
+      const payload = JSON.stringify(record);
+      GM_setValue(key, payload);
+      const verified = GM_getValue(key, null);
+      if (verified !== payload) throw new Error('audit-result read-back mismatch');
+      auditResultCache.set(key, record);
+      signalAuditResultChange(record.conversationKey, record.kind);
+      return true;
+    } catch (error) {
+      setStatus(`Completed ${auditWaveTitle(record.kind)} could not be cached for one-click copy: ${error?.message || 'userscript storage failure'}. Auto3 itself will continue.`, 'warning');
+      return false;
+    }
+  }
+
+  function patchAuditResult(
+    kind,
+    mutator,
+    conversationKey = autoBoundConversationKey || currentConversationKey(),
+    options = {}
+  ) {
+    // Read fresh from GM storage for every read-modify-write. A standby tab can
+    // otherwise overwrite bridge/save fields written by the active tab from a
+    // stale in-memory cache after lease ownership changes.
+    const current = readAuditResultFresh(kind, conversationKey);
+    if (!current) return false;
+
+    // Async bridge/folder callbacks carry the run that initiated the I/O. Never
+    // let an old Core save/retry response mutate a newer Core record that reused
+    // the same conversation+wave storage key.
+    const expectedRunId = String(options.expectedRunId || '');
+    if (expectedRunId && String(current.runId || '') !== expectedRunId) return false;
+
+    const next = { ...current };
+    mutator(next);
+    return writeAuditResult(next);
+  }
+
+  function clearAuditResultsForConversation(conversationKey = autoBoundConversationKey || currentConversationKey()) {
+    if (!conversationKey) return false;
+    let cleared = true;
+    for (const kind of ['core', 'second', 'performance']) {
+      const key = auditResultStorageKey(conversationKey, kind);
+      auditResultCache.delete(key);
+      try { GM_deleteValue(key); } catch (_) { cleared = false; }
+      try {
+        const leftover = GM_getValue(key, null);
+        if (leftover !== null && leftover !== undefined && leftover !== '') {
+          try { GM_setValue(key, ''); } catch (_) { }
+          const verified = GM_getValue(key, null);
+          if (verified !== null && verified !== undefined && verified !== '') cleared = false;
+        }
+      } catch (_) { cleared = false; }
+    }
+    signalAuditResultChange(conversationKey, '');
+    return cleared;
+  }
+
+  function cleanProjectName(value) {
+    return String(value || '')
+      .replace(/[`<>"|?*]/g, '')
+      .replace(/[\\/:]+/g, '-')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 80);
+  }
+
+
+
+  function looksOpaqueIdentity(value) {
+    const cleaned = cleanProjectName(value);
+    if (!cleaned) return false;
+
+    const compact = cleaned.replace(/\s+/g, '');
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(compact)) return true;
+    if (/^(?:file|asset|upload|attachment)[_-]?[0-9a-z_-]{12,}$/i.test(compact)) return true;
+    if (/^[0-9a-f]{12,64}$/i.test(compact)) return true;
+    if (/^[0-9a-z]{8,}(?:-[0-9a-z]{4,}){2,}$/i.test(compact) && /\d/.test(compact)) return true;
+    if (/^\d{6,}$/.test(compact)) return true;
+    return false;
+  }
+
+  function sanitizeProjectIdentity(value) {
+    const cleaned = cleanProjectName(value);
+    if (!cleaned) return '';
+
+    if (/^(?:PROJECT|CHAT|UNTITLED|UNKNOWN|N\/?A|NONE|NULL|NEW CHAT|CHATGPT)$/i.test(cleaned)) return '';
+    if (/^(?:SKIP TO (?:CONTENT|MAIN CONTENT)|VIEW CHAT|IMAGES|PLUGINS|DEEP RESEARCH|SETTINGS|HELP|LOG IN|SIGN UP|SEE PLANS AND PRICING)$/i.test(cleaned)) return '';
+    if (looksOpaqueIdentity(cleaned)) return '';
+    if (/^(?:https?:\/\/|blob:|data:)/i.test(cleaned)) return '';
+    return cleaned;
+  }
+
+
+  function supportedProjectAttachmentFilename(filename) {
+    const raw = String(filename || '').trim();
+    if (!raw) return false;
+    if (/\.(?:tar\.gz|zip|7z|rar|tgz|tar)$/i.test(raw)) return true;
+    return /\.(?:js|mjs|cjs|ts|tsx|jsx|py|rs|go|java|kt|kts|cs|cpp|cc|c|h|hpp|toml|yaml|yml|json|jsonc|ini|cfg|conf|md|txt|ps1|sh|bat|cmd|html|css|scss|vue|svelte)$/i.test(raw);
+  }
+
+  function projectNameFromAuditText(text) {
+    const match = String(text || '').match(/^\s*PROJECT_NAME\s*:\s*(.+?)\s*$/im);
+    return sanitizeProjectIdentity(match?.[1] || '');
+  }
+
+  function projectNameFromArtifactFilename(filename) {
+    let base = String(filename || '').trim().replace(/^.*[\\/]/, '');
+    base = base.replace(/\.(?:tar\.gz|zip|7z|rar|tgz|tar)$/i, '');
+    base = base.replace(/\s*\(\d+\)\s*$/, '');
+    base = base.replace(/(?:[_\s-]+)(?:\d{2}-\d{2}-\d{4}|\d{4}-\d{2}-\d{2})(?:[-_T].*)?$/i, '');
+    base = base.replace(/[_\s-]+T?\d{1,2}[-_:]\d{2}(?:[-_:]\d{2})?.*$/i, '');
+    return sanitizeProjectIdentity(base);
+  }
+
+  function projectNameFromAttachmentFilename(filename) {
+    const raw = String(filename || '').trim().replace(/^.*[\\/]/, '');
+    if (!raw || /^AUDIT_(?:CORE|SECOND_WAVE|PERFORMANCE)_/i.test(raw)) return '';
+    if (!supportedProjectAttachmentFilename(raw)) return '';
+
+    if (/\.(?:tar\.gz|zip|7z|rar|tgz|tar)$/i.test(raw)) {
+      return projectNameFromArtifactFilename(raw);
+    }
+
+    let base = raw.replace(/\.[A-Za-z0-9]{1,12}$/i, '');
+    base = base.replace(/\s*\(\d+\)\s*$/, '');
+    base = base.replace(/(?:[_\s-]+)(?:\d{2}-\d{2}-\d{4}|\d{4}-\d{2}-\d{2})(?:[-_T].*)?$/i, '');
+    base = base.replace(/[_\s-]+T?\d{1,2}[-_:]\d{2}(?:[-_:]\d{2})?.*$/i, '');
+    if (/^(README|LICENSE|UI|CORE|STATE|BOARD|LOG)$/i.test(base)) return '';
+    return sanitizeProjectIdentity(base);
+  }
+
+  function projectNameFromComposerAttachments() {
+    if (detectSite().key !== 'chatgpt') return '';
+
+    const summary = chatGPTReadyAttachmentSummary();
+    const names = Array.isArray(summary?.names) ? summary.names.filter(Boolean) : [];
+    if (!names.length) return '';
+
+    const archives = names.filter(name => /\.(?:tar\.gz|zip|7z|rar|tgz|tar)$/i.test(name));
+    const others = names.filter(name => !/\.(?:tar\.gz|zip|7z|rar|tgz|tar)$/i.test(name));
+
+    for (const name of [...archives, ...others]) {
+      const project = projectNameFromAttachmentFilename(name);
+      if (project) return project;
+    }
+    return '';
+  }
+
+  function reconcileProjectIdentityFromComposer(options = {}) {
+    if (detectSite().key !== 'chatgpt' || !autoRuntime) return '';
+
+    const detected = projectNameFromComposerAttachments();
+    if (!detected) return '';
+
+    const project = updateRuntimeProjectName(detected, 'artifact');
+    if (!project) return '';
+
+    renderAutoAuditState();
+
+    if (state?.autoRenameChat && options.rename !== false) {
+      const renameContext = {
+        source: 'artifact',
+        conversationKey: autoBoundConversationKey || currentConversationKey(),
+        runStartedAt: autoRuntime.startedAt || 0
+      };
+      maybeRenameConversation(project, renameContext).catch(() => { });
+      scheduleConversationTitleGuard(project, renameContext);
+    }
+
+    return project;
+  }
+
+  function projectNameFromCoreTurn(turn) {
+    if (!turn) return '';
+    const haystacks = [readableNodeText(turn), String(turn.textContent || '')];
+    for (const node of turn.querySelectorAll?.('[aria-label], [title]') || []) {
+      haystacks.push(String(node.getAttribute('aria-label') || ''));
+      haystacks.push(String(node.getAttribute('title') || ''));
+    }
+
+    const filenames = [];
+    const seen = new Set();
+    const archivePattern = /([^\n"'<>]{1,180}?\.(?:tar\.gz|zip|7z|rar|tgz|tar))\b/gi;
+    for (const haystack of haystacks) {
+      let match;
+      while ((match = archivePattern.exec(haystack))) {
+        const name = match[1].trim().replace(/^.*[\\/]/, '');
+        if (!name || seen.has(name.toLowerCase())) continue;
+        seen.add(name.toLowerCase());
+        filenames.push(name);
+      }
+    }
+
+    // Prefer the real project archive over generated audit-command attachments.
+    const target = filenames.find(name => !/^AUDIT[_\s-]/i.test(name)) || filenames[0] || '';
+    if (target) return projectNameFromArtifactFilename(target);
+
+    // Single-file audits have no archive. Use a visible non-command implementation
+    // filename only as an early guess; PROJECT_NAME from the Core handoff will
+    // replace it later with authoritative identity.
+    const genericPattern = /([^\n"'<>]{1,160}?\.(?:js|mjs|cjs|ts|tsx|jsx|py|rs|go|java|cs|cpp|c|h|hpp|json|toml|yaml|yml|md))\b/gi;
+    for (const haystack of haystacks) {
+      let match;
+      while ((match = genericPattern.exec(haystack))) {
+        const name = match[1].trim().replace(/^.*[\/]/, '');
+        if (/^AUDIT[_\s-]/i.test(name)) continue;
+        const base = name.replace(/\.[^.]+$/, '');
+        if (/^(README|LICENSE|UI|CORE|STATE|BOARD|LOG)$/i.test(base)) continue;
+        return sanitizeProjectIdentity(base);
+      }
+    }
+    return '';
+  }
+
+  function updateRuntimeProjectName(name, source = '') {
+    const cleaned = sanitizeProjectIdentity(name);
+    if (!cleaned || !autoRuntime) return '';
+    const sourceRank = { '': 0, artifact: 1, handoff: 2 };
+    const currentRank = sourceRank[autoRuntime.projectNameSource] || 0;
+    const nextRank = sourceRank[source] || 0;
+    if (!autoRuntime.projectName || nextRank >= currentRank) {
+      autoRuntime.projectName = cleaned;
+      autoRuntime.projectNameSource = source;
+      saveAutoRuntime({ pauseOnFailure: false });
+    }
+    return autoRuntime.projectName;
+  }
+
+  function safeFilePart(value, fallback = 'PROJECT') {
+    const cleaned = cleanProjectName(value)
+      .replace(/[^\p{L}\p{N}._ -]+/gu, '_')
+      .replace(/\s+/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^[_ .-]+|[_ .-]+$/g, '');
+    return (cleaned || fallback).slice(0, 80);
+  }
+
+  function auditRunStamp(timestamp = autoRuntime?.startedAt || Date.now()) {
+    const date = new Date(Number(timestamp) || Date.now());
+    const pad = value => String(value).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}`;
+  }
+
+  function auditResultFilename(record) {
+    const prefix = record.kind === 'core' ? '01_AUDIT_CORE'
+      : record.kind === 'second' ? '02_AUDIT_SECOND_WAVE'
+        : '03_AUDIT_PERFORMANCE';
+    return `${safeFilePart(record.projectName)}__${prefix}__${auditRunStamp(record.runStartedAt)}.md`;
+  }
+
+  function combinedAuditFilename(projectName, runStartedAt) {
+    return `${safeFilePart(projectName)}__00_AUDIT_ALL_3__${auditRunStamp(runStartedAt)}.md`;
+  }
+
+  async function copyAuditText(text) {
+    const value = String(text || '');
+    if (!value) return false;
+    try {
+      if (typeof GM_setClipboard === 'function') {
+        GM_setClipboard(value, 'text');
+        return true;
+      }
+    } catch (_) { }
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async function copyCompletedAudit(kind) {
+    const record = currentChatAuditRecords().find(item => item.kind === kind) || null;
+    if (!record?.text) {
+      setStatus(`${auditWaveTitle(kind)} is not cached as a completed audit yet. Let that wave reach COMPLETE first.`, 'warning');
+      return false;
+    }
+    const copied = await copyAuditText(record.text);
+    if (!copied) {
+      setStatus(`${auditWaveTitle(kind)} is ready, but clipboard access was rejected by the browser.`, 'error');
+      return false;
+    }
+    copiedAuditKind = kind;
+    copiedAuditUntil = Date.now() + 1400;
+    if (copiedAuditTimer) clearTimeout(copiedAuditTimer);
+    copiedAuditTimer = setTimeout(() => {
+      copiedAuditKind = '';
+      copiedAuditUntil = 0;
+      copiedAuditTimer = 0;
+      renderAutoAuditState();
+    }, 1450);
+
+    renderAutoAuditState();
+    setStatus(`${auditWaveTitle(kind)} COPIED (${record.text.length.toLocaleString()} characters).`, 'success');
+    return true;
+  }
+
+
+  function createAuditRunId() {
+    const random = globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID().replace(/-/g, '')
+      : `${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
+    return `acb-${Date.now().toString(36)}-${random.slice(0, 20)}`;
+  }
+
+  function bridgeToken() {
+    try {
+      return String(GM_getValue(BRIDGE_TOKEN_KEY, '') || '').trim();
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function saveBridgeToken(value) {
+    const token = String(value || '').trim();
+    try {
+      if (token) GM_setValue(BRIDGE_TOKEN_KEY, token);
+      else GM_deleteValue(BRIDGE_TOKEN_KEY);
+
+      const verified = String(GM_getValue(BRIDGE_TOKEN_KEY, '') || '').trim();
+      if (verified !== token) throw new Error('token storage read-back mismatch');
+      return true;
+    } catch (error) {
+      setStatus(`Bridge token could not be saved: ${error?.message || 'userscript storage failure'}.`, 'error');
+      return false;
+    }
+  }
+
+  function normalizedBridgeUrl(value = state?.bridgeUrl || BRIDGE_DEFAULT_URL) {
+    try {
+      const url = new URL(String(value || BRIDGE_DEFAULT_URL).trim());
+      if (url.protocol !== 'http:') return '';
+      const host = String(url.hostname || '').toLowerCase();
+      if (host !== '127.0.0.1' && host !== 'localhost') return '';
+      if (url.username || url.password || url.search || url.hash) return '';
+      const basePath = url.pathname.replace(/\/+$/, '');
+      if (basePath && basePath !== '/') return '';
+      return `${url.protocol}//${url.host}`;
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function bridgeRequest(method, path, body = null, options = {}) {
+    return new Promise(resolve => {
+      const base = normalizedBridgeUrl();
+      if (!base) {
+        resolve({
+          ok: false,
+          status: 0,
+          data: null,
+          errorCode: 'invalid_bridge_url',
+          retriable: false,
+          message: 'Bridge URL must be loopback HTTP (127.0.0.1 or localhost).'
+        });
+        return;
+      }
+
+      const token = options.auth === false ? '' : bridgeToken();
+      if (options.auth !== false && !token) {
+        resolve({
+          ok: false,
+          status: 0,
+          data: null,
+          errorCode: 'invalid_auth',
+          retriable: false,
+          message: 'Bridge token is not configured.'
+        });
+        return;
+      }
+
+      const headers = { Accept: 'application/json' };
+      let payload = null;
+      if (body !== null && body !== undefined) {
+        headers['Content-Type'] = 'application/json';
+        payload = JSON.stringify(body);
+      }
+      if (token) headers['X-ACB-Token'] = token;
+
+      try {
+        GM_xmlhttpRequest({
+          method,
+          url: `${base}${path}`,
+          headers,
+          data: payload,
+          timeout: Number(options.timeout) || BRIDGE_REQUEST_TIMEOUT_MS,
+          responseType: 'text',
+          onload(response) {
+            let data = null;
+            try {
+              data = response.responseText ? JSON.parse(response.responseText) : null;
+            } catch (_) { }
+
+            const status = Number(response.status) || 0;
+            const ok = status >= 200 && status < 300 && data?.ok !== false;
+            const errorCode = String(data?.error?.code || '');
+            const retriable = data?.error?.retriable === true || status >= 500 || status === 0;
+            resolve({
+              ok,
+              status,
+              data,
+              errorCode,
+              retriable,
+              message: String(data?.error?.message || response.statusText || (ok ? 'OK' : 'Bridge request failed'))
+            });
+          },
+          ontimeout() {
+            resolve({
+              ok: false,
+              status: 0,
+              data: null,
+              errorCode: 'timeout',
+              retriable: true,
+              message: 'Bridge request timed out.'
+            });
+          },
+          onerror() {
+            resolve({
+              ok: false,
+              status: 0,
+              data: null,
+              errorCode: 'bridge_offline',
+              retriable: true,
+              message: 'Bridge is not reachable.'
+            });
+          },
+          onabort() {
+            resolve({
+              ok: false,
+              status: 0,
+              data: null,
+              errorCode: 'aborted',
+              retriable: true,
+              message: 'Bridge request was aborted.'
+            });
+          }
+        });
+      } catch (error) {
+        resolve({
+          ok: false,
+          status: 0,
+          data: null,
+          errorCode: 'bridge_exception',
+          retriable: true,
+          message: error?.message || 'Bridge request could not be started.'
+        });
+      }
+    });
+  }
+
+  function bridgeJobKey(jobId) {
+    return `${BRIDGE_JOB_PREFIX}${String(jobId || '')}`;
+  }
+
+  function readBridgeJob(jobId) {
+    if (!jobId) return null;
+    try {
+      const raw = GM_getValue(bridgeJobKey(jobId), null);
+      const parsed = raw ? JSON.parse(raw) : null;
+      return parsed && parsed.version === 1 && parsed.jobId === jobId ? parsed : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+
+  function listBridgeJobs() {
+    const jobs = [];
+    try {
+      const keys = typeof GM_listValues === 'function' ? GM_listValues() : [];
+      for (const key of keys) {
+        if (!String(key).startsWith(BRIDGE_JOB_PREFIX)) continue;
+        try {
+          const raw = GM_getValue(key, null);
+          const job = raw ? JSON.parse(raw) : null;
+          if (!job || job.version !== 1 || !job.jobId || !job.receipt) continue;
+          jobs.push(job);
+        } catch (_) { }
+      }
+    } catch (_) { }
+    return jobs;
+  }
+
+  function bridgeQueueStats(conversationKey = '', jobsSnapshot = null) {
+    const source = Array.isArray(jobsSnapshot) ? jobsSnapshot : listBridgeJobs();
+    const jobs = source.filter(job => !conversationKey || job.conversationKey === conversationKey);
+    return {
+      total: jobs.length,
+      pending: jobs.filter(job => !job.permanent).length,
+      failed: jobs.filter(job => Boolean(job.permanent)).length,
+      jobs
+    };
+  }
+
+  function saveBridgeJob(job, options = {}) {
+    if (!job?.jobId) return false;
+    const key = bridgeJobKey(job.jobId);
+    try {
+      const payload = JSON.stringify(job);
+      GM_setValue(key, payload);
+      if (GM_getValue(key, null) !== payload) throw new Error('bridge queue read-back mismatch');
+      if (options.signal !== false) signalBridgeQueueChange();
+      return true;
+    } catch (error) {
+      setStatus(`Bridge queue persistence failed: ${error?.message || 'userscript storage failure'}. The cached audit itself was not discarded.`, 'error');
+      return false;
+    }
+  }
+
+  function deleteBridgeJob(jobId, options = {}) {
+    if (!jobId) return false;
+    try {
+      GM_deleteValue(bridgeJobKey(jobId));
+      if (options.signal !== false) signalBridgeQueueChange();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function signalBridgeQueueChange() {
+    try {
+      GM_setValue(BRIDGE_QUEUE_SIGNAL_KEY, `${Date.now()}:${Math.random().toString(36).slice(2, 8)}`);
+    } catch (_) { }
+  }
+
+  function clearBridgeFlushTimer() {
+    if (!bridgeFlushTimer) return;
+    clearTimeout(bridgeFlushTimer);
+    bridgeFlushTimer = 0;
+  }
+
+  function bridgeBackoffMs(attempts) {
+    const index = Math.max(0, Math.min(BRIDGE_RETRY_DELAYS_MS.length - 1, Number(attempts || 0) - 1));
+    return BRIDGE_RETRY_DELAYS_MS[index] || BRIDGE_RETRY_DELAYS_MS[0];
+  }
+
+  function readBridgeFlushLease() {
+    try {
+      const raw = GM_getValue(BRIDGE_FLUSH_LEASE_KEY, null);
+      return raw ? JSON.parse(raw) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function claimBridgeFlushLease() {
+    const now = Date.now();
+    const existing = readBridgeFlushLease();
+    if (
+      existing &&
+      existing.ownerId &&
+      existing.ownerId !== autoInstanceId &&
+      Number(existing.expiresAt) > now
+    ) return false;
+
+    const nonce = `${now.toString(36)}:${Math.random().toString(36).slice(2, 10)}`;
+    const lease = {
+      ownerId: autoInstanceId,
+      nonce,
+      expiresAt: now + BRIDGE_FLUSH_LEASE_MS
+    };
+
+    try {
+      GM_setValue(BRIDGE_FLUSH_LEASE_KEY, JSON.stringify(lease));
+      const verified = readBridgeFlushLease();
+      return Boolean(
+        verified &&
+        verified.ownerId === autoInstanceId &&
+        verified.nonce === nonce &&
+        Number(verified.expiresAt) > Date.now()
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function renewBridgeFlushLease() {
+    const current = readBridgeFlushLease();
+    if (
+      !current ||
+      current.ownerId !== autoInstanceId ||
+      !current.nonce ||
+      Number(current.expiresAt || 0) <= Date.now()
+    ) return false;
+
+    const renewed = {
+      ...current,
+      expiresAt: Date.now() + BRIDGE_FLUSH_LEASE_MS
+    };
+
+    try {
+      GM_setValue(BRIDGE_FLUSH_LEASE_KEY, JSON.stringify(renewed));
+      const verified = readBridgeFlushLease();
+      return Boolean(
+        verified &&
+        verified.ownerId === autoInstanceId &&
+        verified.nonce === current.nonce &&
+        Number(verified.expiresAt) > Date.now()
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function releaseBridgeFlushLease() {
+    const lease = readBridgeFlushLease();
+    if (!lease || lease.ownerId !== autoInstanceId) return;
+    try {
+      GM_setValue(BRIDGE_FLUSH_LEASE_KEY, JSON.stringify({
+        ownerId: '',
+        nonce: '',
+        expiresAt: 0
+      }));
+    } catch (_) { }
+  }
+
+  function ensureAuditRunId() {
+    if (!autoRuntime) return '';
+    if (autoRuntime.runId) return autoRuntime.runId;
+
+    const created = createAuditRunId();
+    autoRuntime.runId = created;
+    if (!saveAutoRuntime({ pauseOnFailure: false })) {
+      // A run id is lineage authority, not a best-effort decoration. Never let
+      // results/bridge jobs escape under an id that reload cannot recover.
+      if (autoRuntime.runId === created) autoRuntime.runId = '';
+      return '';
+    }
+    return created;
+  }
+
+  function bridgeConversationIdFromKey(conversationKey) {
+    const match = String(conversationKey || '').match(/^c:(.+)$/);
+    return match ? match[1] : '';
+  }
+
+  function createBridgeReceipt(runId, kind) {
+    const random = globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID().replace(/-/g, '').slice(0, 16)
+      : `${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 10)}`;
+    return `${kind}-${String(runId || 'run').slice(-24)}-${Date.now().toString(36)}-${random}`;
+  }
+
+  function createBridgeMaterializeReceipt(runId, kind) {
+    // Keep forced-save receipts deliberately short and inside conservative
+    // idempotency-key limits. A fresh delivery run_id supplies the real batch
+    // identity; the receipt only has to be unique for this request.
+    const random = globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID().replace(/-/g, '').slice(0, 10)
+      : Math.random().toString(36).slice(2, 12);
+    return `${kind}-m-${Date.now().toString(36)}-${random}`;
+  }
+
+  function createBridgeMaterializeRunId() {
+    const random = globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID().replace(/-/g, '').slice(0, 12)
+      : `${Math.random().toString(36).slice(2, 8)}${Math.random().toString(36).slice(2, 8)}`;
+    return `acb-mat-${Date.now().toString(36)}-${random}`;
+  }
+
+  function bridgeWaveOrder(kind) {
+    if (kind === 'core') return 1;
+    if (kind === 'second') return 2;
+    if (kind === 'performance') return 3;
+    return 9;
+  }
+
+  function reconcileStagedBridgeJob(job) {
+    if (!job?.staged) return job;
+    const expectedRunId = String(job.sourceRunId || job.runId || '');
+    const record = readAuditResultFresh(job.wave, job.conversationKey);
+    const receiptMatches = Boolean(
+      record &&
+      String(record.runId || '') === expectedRunId &&
+      (job.materialize
+        ? String(record.bridgeMaterializeReceipt || '') === String(job.receipt || '')
+        : String(record.bridgeReceipt || '') === String(job.receipt || ''))
+    );
+
+    if (!receiptMatches || !Number(record?.bridgeQueuedAt || record?.bridgeMaterializeQueuedAt || 0)) {
+      deleteBridgeJob(job.jobId, { signal: false });
+      return null;
+    }
+
+    const active = { ...job, staged: false, updatedAt: Date.now() };
+    return saveBridgeJob(active, { signal: false }) ? active : null;
+  }
+
+  function enqueueBridgeAuditRecord(record, options = {}) {
+    if (!record?.text || !record?.kind || !record?.conversationKey) return false;
+    if (Number(record.bridgeSavedAt) > 0 && !options.force) return true;
+
+    const runId = String(record.runId || autoRuntime?.runId || ensureAuditRunId());
+    if (!runId) return false;
+    const deliveryRunId = String(options.deliveryRunId || runId);
+    const canonicalReceipt = String(record.bridgeReceipt || createBridgeReceipt(runId, record.kind));
+    const receipt = options.freshReceipt ? createBridgeMaterializeReceipt(deliveryRunId, record.kind) : canonicalReceipt;
+
+    const existingJob = readBridgeJob(receipt);
+    if (existingJob && !options.force) {
+      scheduleBridgeFlush(50);
+      return true;
+    }
+
+    const now = Date.now();
+    const job = {
+      version: 1,
+      jobId: receipt,
+      receipt,
+      runId,
+      sourceRunId: runId,
+      deliveryRunId,
+      conversationKey: record.conversationKey,
+      conversationId: bridgeConversationIdFromKey(record.conversationKey),
+      project: record.projectName || 'PROJECT',
+      wave: record.kind,
+      completedAt: Number(record.completedAt) || now,
+      content: String(record.text),
+      attempts: 0,
+      nextAttemptAt: now,
+      permanent: false,
+      errorCode: '',
+      lastError: '',
+      materialize: Boolean(options.freshReceipt),
+      staged: true,
+      inFlightAt: 0,
+      deliveredAwaitingAck: false,
+      deliveredData: null,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    // Persist the actual retry authority before exposing queued metadata. Signal
+    // is suppressed until the matching audit record is committed, preventing a
+    // cross-tab flush from racing this local two-record transaction.
+    if (!saveBridgeJob(job, { signal: false })) return false;
+
+    const queuedRecord = patchAuditResult(record.kind, next => {
+      next.runId = runId;
+      if (!next.bridgeReceipt) next.bridgeReceipt = canonicalReceipt;
+      next.bridgeQueuedAt = now;
+      next.bridgeError = '';
+      if (options.freshReceipt) {
+        next.bridgeMaterializeReceipt = receipt;
+        next.bridgeMaterializeRunId = deliveryRunId;
+        next.bridgeMaterializeQueuedAt = now;
+        next.bridgeSavedAt = 0;
+        next.bridgeFiles = [];
+        next.savedAt = 0;
+        next.savedFileName = '';
+        next.saveError = '';
+        if (record.kind === 'performance') {
+          next.combinedSavedAt = 0;
+          next.combinedFileName = '';
+        }
+      } else {
+        next.bridgeSavedAt = Number(next.bridgeSavedAt) || 0;
+      }
+    }, record.conversationKey, { expectedRunId: runId });
+
+    if (!queuedRecord) {
+      deleteBridgeJob(job.jobId, { signal: false });
+      signalBridgeQueueChange();
+      return false;
+    }
+
+    // Phase 2: expose the job to delivery only after queued metadata exists. If
+    // this write fails, the staged job remains durable and flush-time
+    // reconciliation can safely complete or discard it without remote I/O.
+    saveBridgeJob({ ...job, staged: false, updatedAt: Date.now() }, { signal: false });
+    signalBridgeQueueChange();
+    if (options.deferFlush) {
+      renderAutoAuditState();
+      return true;
+    }
+    if (state?.autoSaveAuditFiles && state?.bridgeEnabled) {
+      flushBridgeQueue({ force: true, conversationKey: record.conversationKey })
+        .catch(() => scheduleBridgeFlush(50));
+    } else {
+      scheduleBridgeFlush(50);
+    }
+    renderAutoAuditState();
+    return true;
+  }
+
+  function bridgeJobRequest(job) {
+    return {
+      api_version: BRIDGE_API_VERSION,
+      receipt: job.receipt,
+      run_id: job.deliveryRunId || job.runId,
+      conversation_id: job.conversationId || '',
+      project: job.project,
+      wave: job.wave,
+      status: 'complete',
+      completed_at: new Date(job.completedAt || Date.now()).toISOString(),
+      content: job.content
+    };
+  }
+
+  function markBridgeJobPermanent(job, response) {
+    const latest = readBridgeJob(job?.jobId || job?.receipt || '');
+    if (!latest) return false;
+    const errorCode = response.errorCode || `http_${response.status || 0}`;
+    const canonical = readAuditResultFresh(latest.wave, latest.conversationKey);
+    const canCompact =
+      errorCode !== 'invalid_auth' &&
+      canonical &&
+      String(canonical.runId || '') === String(latest.sourceRunId || latest.runId || '') &&
+      Boolean(canonical.text);
+    const next = {
+      ...latest,
+      permanent: true,
+      errorCode,
+      lastError: response.message || 'Permanent bridge error.',
+      updatedAt: Date.now(),
+      nextAttemptAt: 0,
+      inFlightAt: 0,
+      ...(canCompact ? { content: '', contentOmitted: true } : {})
+    };
+    if (!saveBridgeJob(next)) return false;
+    patchAuditResult(latest.wave, record => {
+      record.bridgeError = next.lastError;
+      record.saveError = next.lastError;
+    }, latest.conversationKey, { expectedRunId: String(latest.sourceRunId || latest.runId || '') });
+    return true;
+  }
+
+  function markBridgeJobRetry(job, response) {
+    const latest = readBridgeJob(job?.jobId || job?.receipt || '');
+    if (!latest) return false;
+    const attempts = Math.max(0, Number(latest.attempts) || 0) + 1;
+    const next = {
+      ...latest,
+      attempts,
+      permanent: false,
+      errorCode: response.errorCode || `http_${response.status || 0}`,
+      lastError: response.message || 'Transient bridge error.',
+      updatedAt: Date.now(),
+      nextAttemptAt: Date.now() + bridgeBackoffMs(attempts),
+      inFlightAt: 0
+    };
+    if (!saveBridgeJob(next)) return false;
+    patchAuditResult(latest.wave, record => {
+      record.bridgeError = next.lastError;
+      record.saveError = '';
+    }, latest.conversationKey, { expectedRunId: String(latest.sourceRunId || latest.runId || '') });
+    return true;
+  }
+
+  function markBridgeJobSaved(job, response) {
+    const files = Array.isArray(response.data?.files) ? response.data.files.map(value => String(value)) : [];
+    const expectedRunId = String(job.sourceRunId || job.runId || '');
+    const patched = patchAuditResult(job.wave, record => {
+      const now = Date.now();
+      record.bridgeSavedAt = now;
+      record.bridgeFiles = files;
+      record.bridgeError = '';
+      record.savedAt = now;
+      record.savedFileName = files[0] || `${job.project} via ACBBridge`;
+      record.saveError = '';
+      if (job.materialize) {
+        record.bridgeMaterializedAt = now;
+        record.bridgeMaterializeReceipt = job.receipt;
+      }
+      if (job.wave === 'performance' && response.data?.all3_ready) {
+        record.combinedSavedAt = now;
+        const all3 = files.find(value => /ALL_3/i.test(value));
+        if (all3) record.combinedFileName = all3;
+      }
+    }, job.conversationKey, { expectedRunId });
+
+    if (patched) {
+      deleteBridgeJob(job.jobId);
+      return true;
+    }
+
+    const currentRecord = readAuditResultFresh(job.wave, job.conversationKey);
+    const storedRuntime = readStoredRuntime(job.conversationKey);
+    const clearlyStale =
+      (currentRecord && String(currentRecord.runId || '') && String(currentRecord.runId || '') !== expectedRunId) ||
+      storedRuntime.runtime?.resetBarrierActive ||
+      (storedRuntime.runtime?.runId && String(storedRuntime.runtime.runId) !== expectedRunId);
+    if (clearlyStale) {
+      deleteBridgeJob(job.jobId);
+      return true;
+    }
+
+    // Remote write succeeded, local acknowledgement did not. Keep a compact
+    // local-ack job so retry never POSTs the same materialization again.
+    const latest = readBridgeJob(job.jobId) || job;
+    return saveBridgeJob({
+      ...latest,
+      deliveredAwaitingAck: true,
+      deliveredData: response.data || {},
+      inFlightAt: 0,
+      nextAttemptAt: Date.now() + 1000,
+      lastError: 'Remote bridge save succeeded; waiting for local audit-result acknowledgement.',
+      updatedAt: Date.now()
+    });
+  }
+
+  async function deliverBridgeJob(job) {
+    if (job.deliveredAwaitingAck) {
+      return markBridgeJobSaved(job, { ok: true, data: job.deliveredData || {} });
+    }
+
+    const activeJob = {
+      ...job,
+      inFlightAt: Date.now(),
+      updatedAt: Date.now()
+    };
+    if (!saveBridgeJob(activeJob, { signal: false })) return false;
+
+    const response = await bridgeRequest('POST', '/v1/audits', bridgeJobRequest(activeJob));
+    if (response.ok && (!response.data || typeof response.data !== 'object')) {
+      bridgeState = 'offline';
+      bridgeMessage = 'Bridge returned an invalid success payload; audit remains queued.';
+      markBridgeJobRetry(activeJob, { ...response, errorCode: 'invalid_success_payload', retriable: true, message: 'Bridge returned HTTP success without a valid JSON acknowledgement.' });
+      return false;
+    }
+
+    if (response.ok && activeJob.materialize && response.data?.duplicate) {
+      if (!readBridgeJob(activeJob.jobId || activeJob.receipt)) {
+        bridgeState = 'connected';
+        bridgeMessage = 'Connected. Forced SAVE was completed by another ACB tab.';
+        bridgeLastCheckedAt = Date.now();
+        return true;
+      }
+      bridgeState = 'error';
+      bridgeMessage = 'Bridge returned duplicate for a forced physical rewrite.';
+      markBridgeJobPermanent(activeJob, { ...response, errorCode: 'materialize_duplicate_unverified', message: 'Forced SAVE received duplicate acknowledgement instead of a verified physical rewrite.' });
+      return false;
+    }
+
+    if (response.ok && activeJob.materialize) {
+      const files = Array.isArray(response.data?.files) ? response.data.files.filter(Boolean) : [];
+      if (!files.length) {
+        bridgeState = 'error';
+        bridgeMessage = 'Bridge did not return written file paths for forced SAVE.';
+        markBridgeJobPermanent(activeJob, { ...response, errorCode: 'materialize_files_unverified', message: 'Forced SAVE returned success without written file paths, so physical materialization cannot be verified.' });
+        return false;
+      }
+    }
+
+    if (response.ok) {
+      const files = Array.isArray(response.data?.files) ? response.data.files.filter(Boolean) : [];
+      if (!response.data?.duplicate && !files.length) {
+        bridgeState = 'offline';
+        bridgeMessage = 'Bridge success did not identify a written audit file; job remains queued.';
+        markBridgeJobRetry(activeJob, { ...response, errorCode: 'success_files_unverified', retriable: true, message: 'Bridge returned success without written file paths.' });
+        return false;
+      }
+      bridgeState = 'connected';
+      bridgeMessage = response.data?.duplicate ? 'Connected. Duplicate-safe audit receipt acknowledged.' : 'Connected. Audit persistence active.';
+      bridgeLastCheckedAt = Date.now();
+      return markBridgeJobSaved(activeJob, response);
+    }
+
+    if (response.status === 401 || response.status === 403 || response.errorCode === 'invalid_auth') {
+      bridgeState = 'auth';
+      bridgeMessage = 'Bridge is reachable, but the token is invalid or missing.';
+      markBridgeJobPermanent(activeJob, { ...response, errorCode: 'invalid_auth', retriable: false });
+      return false;
+    }
+    if (response.status === 409 || response.errorCode === 'receipt_conflict') {
+      bridgeState = 'error';
+      bridgeMessage = 'Bridge rejected an idempotency receipt conflict.';
+      markBridgeJobPermanent(activeJob, { ...response, retriable: false });
+      return false;
+    }
+    if (response.retriable) {
+      bridgeState = 'offline';
+      bridgeMessage = response.message || 'Bridge/output is temporarily unavailable; queued saves will retry.';
+      markBridgeJobRetry(activeJob, response);
+      return false;
+    }
+    bridgeState = 'error';
+    bridgeMessage = response.message || 'Bridge rejected the audit payload.';
+    markBridgeJobPermanent(activeJob, response);
+    return false;
+  }
+
+  function nextBridgeFlushDelay(jobsSnapshot = null) {
+    const source = Array.isArray(jobsSnapshot) ? jobsSnapshot : listBridgeJobs();
+    const jobs = source.filter(job => !job.permanent);
+    if (!jobs.length) return 0;
+    const soonest = Math.min(...jobs.map(job => Math.max(0, Number(job.nextAttemptAt) || 0)));
+    return Math.max(50, soonest - Date.now());
+  }
+
+  function scheduleBridgeFlush(delay = null, jobsSnapshot = null) {
+    if (!state?.bridgeEnabled || !state?.autoSaveAuditFiles) return;
+    clearBridgeFlushTimer();
+    const jobs = Array.isArray(jobsSnapshot) ? jobsSnapshot : listBridgeJobs();
+    if (!jobs.some(job => !job.permanent)) return;
+    const computed = delay === null ? nextBridgeFlushDelay(jobs) : Number(delay);
+    if (!Number.isFinite(computed) || computed < 0) return;
+    bridgeFlushTimer = setTimeout(() => {
+      bridgeFlushTimer = 0;
+      flushBridgeQueue().catch(() => { });
+    }, Math.max(0, computed));
+  }
+
+  async function flushBridgeQueue(options = {}) {
+    if (
+      bridgeFlushInFlight ||
+      !state?.bridgeEnabled ||
+      (!state?.autoSaveAuditFiles && !options.manual)
+    ) return false;
+    if (!normalizedBridgeUrl()) {
+      bridgeState = 'error';
+      bridgeMessage = 'Bridge URL is invalid. Only loopback HTTP is allowed.';
+      renderAutoAuditState();
+      return false;
+    }
+
+    if (!bridgeToken()) {
+      bridgeState = 'auth';
+      bridgeMessage = 'Paste the bridge token once in Settings.';
+      renderAutoAuditState();
+      return false;
+    }
+
+    if (!claimBridgeFlushLease()) {
+      scheduleBridgeFlush(1200);
+      return false;
+    }
+
+    bridgeFlushInFlight = true;
+    try {
+      const now = Date.now();
+      const requestedConversation = String(options.conversationKey || '');
+      const jobs = listBridgeJobs()
+        .map(job => reconcileStagedBridgeJob(job))
+        .filter(Boolean)
+        .filter(job =>
+          !job.staged &&
+          !job.permanent &&
+          (!requestedConversation || job.conversationKey === requestedConversation) &&
+          (options.force || Number(job.nextAttemptAt || 0) <= now)
+        )
+        .sort((a, b) => {
+          const timeDelta = Number(a.createdAt || 0) - Number(b.createdAt || 0);
+          if (timeDelta) return timeDelta;
+          return bridgeWaveOrder(a.wave) - bridgeWaveOrder(b.wave);
+        });
+
+      for (const job of jobs) {
+        // Long backlogs can outlive the original flush lease. Renew before each
+        // irreversible delivery so a standby tab cannot start the same job set
+        // while this owner is still actively draining it.
+        if (!renewBridgeFlushLease()) {
+          bridgeMessage = 'Bridge flush ownership changed; remaining jobs stay queued for the current owner.';
+          break;
+        }
+
+        // Re-read before delivery: another tab may already have completed it.
+        let current = null;
+        try {
+          const raw = GM_getValue(bridgeJobKey(job.jobId), null);
+          current = raw ? JSON.parse(raw) : null;
+        } catch (_) { }
+        if (!current || current.permanent) continue;
+
+        await deliverBridgeJob(current);
+      }
+    } finally {
+      bridgeFlushInFlight = false;
+      releaseBridgeFlushLease();
+      renderAutoAuditState();
+      scheduleBridgeFlush();
+    }
+    return true;
+  }
+
+  async function flushBridgeQueueManualReliable(conversationKey, options = {}) {
+    const maxAttempts = Math.max(1, Number(options.maxAttempts) || 5);
+    const delays = [0, 180, 420, 850, 1400];
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const statsBefore = bridgeQueueStats(conversationKey);
+      if (!statsBefore.pending) return true;
+
+      if (attempt > 0) {
+        await sleep(delays[Math.min(attempt, delays.length - 1)]);
+      }
+
+      const flushed = await flushBridgeQueue({
+        force: true,
+        manual: true,
+        conversationKey
+      });
+
+      const statsAfter = bridgeQueueStats(conversationKey);
+      if (!statsAfter.pending) return statsAfter.failed === 0;
+
+      // false commonly means another tab owns the short bridge flush lease or
+      // this tab still has a prior flush finishing. Do not steal ownership;
+      // simply retry for a bounded period.
+      if (flushed && statsAfter.failed > 0) return false;
+    }
+
+    signalBridgeQueueChange();
+    scheduleBridgeFlush(100);
+    return bridgeQueueStats(conversationKey).pending === 0;
+  }
+
+  function resetBridgeFailedJobs(errorCode = '') {
+    let changed = 0;
+    for (const job of listBridgeJobs()) {
+      if (!job.permanent) continue;
+      if (errorCode && job.errorCode !== errorCode) continue;
+      const next = {
+        ...job,
+        permanent: false,
+        attempts: 0,
+        errorCode: '',
+        lastError: '',
+        nextAttemptAt: Date.now(),
+        inFlightAt: 0,
+        updatedAt: Date.now()
+      };
+      if (saveBridgeJob(next)) changed += 1;
+    }
+    if (changed) scheduleBridgeFlush(50);
+    return changed;
+  }
+
+  async function checkBridge(options = {}) {
+    if (!state?.bridgeEnabled) {
+      bridgeState = 'disabled';
+      bridgeMessage = 'Bridge integration is disabled.';
+      renderAutoAuditState();
+      return false;
+    }
+
+    const url = normalizedBridgeUrl();
+    if (!url) {
+      bridgeState = 'error';
+      bridgeMessage = 'Invalid URL. Use http://127.0.0.1:<port> or http://localhost:<port>.';
+      renderAutoAuditState();
+      return false;
+    }
+
+    bridgeState = 'checking';
+    bridgeMessage = 'Checking localhost bridge...';
+    renderBridgeState();
+
+    const health = await bridgeRequest('GET', '/health', null, { auth: false, timeout: 5000 });
+    if (!health.ok) {
+      bridgeState = 'offline';
+      bridgeMessage = health.message || 'Bridge is offline.';
+      bridgeLastCheckedAt = Date.now();
+      renderAutoAuditState();
+      return false;
+    }
+
+    if (!bridgeToken()) {
+      bridgeState = 'auth';
+      bridgeMessage = 'Bridge is running. Paste/save the token to enable audit writes.';
+      bridgeLastCheckedAt = Date.now();
+      renderAutoAuditState();
+      return false;
+    }
+
+    const status = await bridgeRequest('GET', '/v1/status', null, { timeout: 7000 });
+    bridgeLastCheckedAt = Date.now();
+
+    if (!status.ok || !status.data || typeof status.data !== 'object') {
+      bridgeState = status.status === 401 || status.status === 403
+        ? 'auth'
+        : (status.retriable ? 'offline' : 'error');
+      bridgeMessage = !status.ok
+        ? (status.message || 'Bridge status check failed.')
+        : 'Bridge /v1/status returned HTTP success without a valid JSON status payload.';
+      renderAutoAuditState();
+      return false;
+    }
+
+    bridgeState = 'connected';
+    bridgeServerVersion = String(status.data?.version || status.data?.bridge_version || '');
+    bridgeOutputRoot = String(
+      status.data?.output_root ||
+      status.data?.output?.root ||
+      status.data?.output ||
+      ''
+    );
+    bridgeMessage = bridgeOutputRoot
+      ? `Connected · ${bridgeOutputRoot}`
+      : 'Connected · automatic audit persistence ready.';
+    renderAutoAuditState();
+
+    resetBridgeFailedJobs('invalid_auth');
+
+    if (!options.suppressFlush) {
+      scheduleBridgeFlush(options.force ? 0 : 50);
+    }
+
+    return true;
+  }
+
+  function renderBridgeState(jobsSnapshot = null) {
+    const node = panel?.querySelector('#acb-bridge-state');
+    if (!node) return;
+    const stats = bridgeQueueStats('', jobsSnapshot);
+    const tokenPresent = Boolean(bridgeToken());
+    const labels = { unknown: 'UNKNOWN', disabled: 'OFF', checking: 'CHECK', connected: 'CONNECTED', offline: 'OFFLINE', auth: 'TOKEN', error: 'ERROR' };
+    node.dataset.state = bridgeState === 'connected' ? 'ready' : bridgeState === 'checking' || bridgeState === 'unknown' ? 'warning' : 'error';
+    node.textContent = `${labels[bridgeState] || 'UNKNOWN'} · queued ${stats.pending} · failed ${stats.failed}`;
+    node.title = `${bridgeMessage}${tokenPresent ? ' Token stored.' : ' No token stored.'}${bridgeServerVersion ? ` Bridge ${bridgeServerVersion}.` : ''}${bridgeOutputRoot ? ` Output: ${bridgeOutputRoot}` : ''} Browser-fallback ALL_3 uses compact_v1. Server-generated __00_AUDIT_ALL_3.md also requires the included ACBBridge 1.0.1 compact patch.`;
+  }
+
+  function currentBridgeSaveState(conversationKey = autoBoundConversationKey || currentConversationKey(), jobsSnapshot = null) {
+    if (!state?.autoSaveAuditFiles || !state?.bridgeEnabled) return { pending: 0, failed: 0 };
+    return bridgeQueueStats(conversationKey, jobsSnapshot);
+  }
+
+  function installBridgeQueueListener() {
+    if (bridgeQueueListenerId !== null || typeof GM_addValueChangeListener !== 'function') return;
+    try {
+      bridgeQueueListenerId = GM_addValueChangeListener(BRIDGE_QUEUE_SIGNAL_KEY, () => {
+        renderAutoAuditState();
+        if (state?.bridgeEnabled && state?.autoSaveAuditFiles) scheduleBridgeFlush(100);
+      });
+    } catch (_) {
+      bridgeQueueListenerId = null;
+    }
+  }
+
+  function openAuditFsDb() {
+    return new Promise((resolve, reject) => {
+      if (!globalThis.indexedDB) {
+        reject(new Error('IndexedDB is unavailable'));
+        return;
+      }
+      const request = indexedDB.open(AUDIT_FS_DB_NAME, AUDIT_FS_DB_VERSION);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(AUDIT_FS_STORE)) db.createObjectStore(AUDIT_FS_STORE);
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error || new Error('IndexedDB open failed'));
+    });
+  }
+
+  async function storeAuditDirectoryHandle(handle) {
+    const db = await openAuditFsDb();
+    try {
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(AUDIT_FS_STORE, 'readwrite');
+        tx.objectStore(AUDIT_FS_STORE).put(handle, AUDIT_FS_HANDLE_KEY);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error || new Error('Directory handle save failed'));
+        tx.onabort = () => reject(tx.error || new Error('Directory handle save aborted'));
+      });
+    } finally {
+      db.close();
+    }
+  }
+
+  async function loadAuditDirectoryHandle() {
+    if (auditDirectoryHandle) return auditDirectoryHandle;
+    try {
+      const db = await openAuditFsDb();
+      try {
+        auditDirectoryHandle = await new Promise((resolve, reject) => {
+          const tx = db.transaction(AUDIT_FS_STORE, 'readonly');
+          const request = tx.objectStore(AUDIT_FS_STORE).get(AUDIT_FS_HANDLE_KEY);
+          request.onsuccess = () => resolve(request.result || null);
+          request.onerror = () => reject(request.error || new Error('Directory handle read failed'));
+        });
+      } finally {
+        db.close();
+      }
+      return auditDirectoryHandle;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function auditDirectoryPermission(handle, request = false) {
+    if (!handle) return 'missing';
+    const options = { mode: 'readwrite' };
+    try {
+      if (typeof handle.queryPermission === 'function') {
+        const current = await handle.queryPermission(options);
+        if (current === 'granted') return 'granted';
+        if (current === 'denied') return 'denied';
+      }
+      if (request && typeof handle.requestPermission === 'function') {
+        return await handle.requestPermission(options);
+      }
+    } catch (_) { }
+    return 'prompt';
+  }
+
+  function renderAuditFolderState() {
+    const node = panel?.querySelector('#acb-audit-folder-state');
+    if (!node) return;
+    const handleName = auditDirectoryHandle?.name ? ` ${auditDirectoryHandle.name}` : '';
+    node.dataset.state = auditDirectoryState === 'ready' ? 'ready'
+      : auditDirectoryState === 'error' ? 'error'
+        : 'warning';
+    node.textContent = `${auditDirectoryState === 'ready' ? 'Fallback ready:' : auditDirectoryState === 'saving' ? 'Fallback saving:' : 'Fallback:'}${handleName || ' not linked'} · ${auditDirectoryMessage}`;
+    node.title = `Preferred destination: ${AUDIT_OUTPUT_HINT}`;
+  }
+
+  async function refreshAuditDirectoryState() {
+    const handle = await loadAuditDirectoryHandle();
+    if (!handle) {
+      auditDirectoryState = 'missing';
+      auditDirectoryMessage = 'Choose the AUDITING_IMPLEMENTATION folder once; completed audits stay cached meanwhile.';
+      renderAuditFolderState();
+      renderAutoAuditState();
+      return false;
+    }
+    const permission = await auditDirectoryPermission(handle, false);
+    if (permission === 'granted') {
+      auditDirectoryState = 'ready';
+      auditDirectoryMessage = 'automatic Core / Second / Performance / ALL_3 writes enabled.';
+      renderAuditFolderState();
+      renderAutoAuditState();
+      if (state?.autoSaveAuditFiles) {
+        setTimeout(() => { flushCurrentAuditResultsToFolder().catch(() => { }); }, 0);
+      }
+      return true;
+    }
+    auditDirectoryState = permission === 'denied' ? 'error' : 'permission';
+    auditDirectoryMessage = permission === 'denied'
+      ? 'write permission denied; choose the folder again.'
+      : 'write permission needs one user gesture; press Choose folder.';
+    renderAuditFolderState();
+    renderAutoAuditState();
+    return false;
+  }
+
+  async function chooseAuditOutputFolder() {
+    const picker = globalThis.showDirectoryPicker || window.showDirectoryPicker;
+    if (typeof picker !== 'function') {
+      auditDirectoryState = 'error';
+      auditDirectoryMessage = 'this browser does not expose the File System Access directory picker.';
+      renderAuditFolderState();
+      setStatus('Direct folder saving is unavailable in this browser. Completed audits are still cached and copyable from 1 / 2 / 3.', 'warning');
+      return false;
+    }
+
+    try {
+      const handle = await picker.call(window, { id: 'ai-chatbuttons-audit-output', mode: 'readwrite' });
+      const permission = await auditDirectoryPermission(handle, true);
+      if (permission !== 'granted') throw new Error('write permission was not granted');
+      await storeAuditDirectoryHandle(handle);
+      auditDirectoryHandle = handle;
+      auditDirectoryState = 'ready';
+      auditDirectoryMessage = 'automatic audit file saving enabled.';
+      renderAuditFolderState();
+      setStatus(`Audit output folder linked: ${handle.name}. Existing completed waves in this chat will be flushed now.`, 'success');
+      await flushCurrentAuditResultsToFolder({ force: true });
+      return true;
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        setStatus('Audit folder selection canceled. Nothing changed.', 'info');
+        return false;
+      }
+      auditDirectoryState = 'error';
+      auditDirectoryMessage = error?.message || 'folder selection failed.';
+      renderAuditFolderState();
+      setStatus(`Audit folder could not be linked: ${auditDirectoryMessage}`, 'error');
+      return false;
+    }
+  }
+
+  async function writeTextFileToAuditFolder(filename, content) {
+    const handle = await loadAuditDirectoryHandle();
+    if (!handle) throw new Error('audit output folder is not linked');
+    const permission = await auditDirectoryPermission(handle, false);
+    if (permission !== 'granted') throw new Error('audit output folder permission is not currently granted');
+    const fileHandle = await handle.getFileHandle(filename, { create: true });
+    const writable = await fileHandle.createWritable();
+    try {
+      await writable.write(String(content || ''));
+    } finally {
+      await writable.close();
+    }
+    return true;
+  }
+
+  async function autoSaveAuditRecord(record, options = {}) {
+    if ((!state?.autoSaveAuditFiles && !options.force) || !record?.text) return false;
+    if (record.savedAt && !options.force && !record.saveError) return true;
+    try {
+      auditDirectoryState = 'saving';
+      auditDirectoryMessage = `writing ${auditResultFilename(record)}...`;
+      renderAuditFolderState();
+      await writeTextFileToAuditFolder(auditResultFilename(record), record.text);
+      patchAuditResult(record.kind, next => {
+        next.savedAt = Date.now();
+        next.savedFileName = auditResultFilename(record);
+        next.saveError = '';
+      }, record.conversationKey, { expectedRunId: String(record.runId || '') });
+      auditDirectoryState = 'ready';
+      auditDirectoryMessage = 'automatic audit file saving enabled.';
+      renderAuditFolderState();
+      renderAutoAuditState();
+      return true;
+    } catch (error) {
+      patchAuditResult(record.kind, next => { next.saveError = error?.message || 'save failed'; }, record.conversationKey, { expectedRunId: String(record.runId || '') });
+      auditDirectoryState = /not linked|permission/i.test(String(error?.message || '')) ? 'permission' : 'error';
+      auditDirectoryMessage = error?.message || 'automatic save failed.';
+      renderAuditFolderState();
+      renderAutoAuditState();
+      return false;
+    }
+  }
+
+  function auditTestMetadata(text) {
+    const header = handoffHeader(normalizeAuditResponseText(text || ''));
+    const status = String(header.match(/^\s*TEST_STATUS\s*:\s*(.+)$/im)?.[1] || '').trim();
+    const limitation = String(header.match(/^\s*TEST_LIMITATION\s*:\s*(.+)$/im)?.[1] || '').trim();
+    const verifiedInstead = String(header.match(/^\s*VERIFIED_INSTEAD\s*:\s*(.+)$/im)?.[1] || '').trim();
+
+    const allowed = new Set([
+      'TEST_PASSED',
+      'TEST_FAILED',
+      'TEST_PARTIAL',
+      'TEST_NOT_RUN_ENVIRONMENT',
+      'TEST_NOT_APPLICABLE'
+    ]);
+
+    return {
+      status: allowed.has(status.toUpperCase()) ? status.toUpperCase() : '',
+      limitation,
+      verifiedInstead,
+      complete: Boolean(
+        allowed.has(status.toUpperCase()) &&
+        limitation &&
+        verifiedInstead
+      )
+    };
+  }
+
+  function auditStageFromKind(kind) {
+    if (kind === 'core') return 'wait-core';
+    if (kind === 'second') return 'wait-second';
+    if (kind === 'performance') return 'wait-performance';
+    return '';
+  }
+
+  function parseAuditHandoffParts(record) {
+    const text = normalizeAuditResponseText(record?.text || '');
+    const stage = auditStageFromKind(record?.kind);
+    const integrity = auditHandoffIntegrity(stage, text);
+    if (!integrity.valid) {
+      throw new Error(`${auditWaveTitle(record?.kind)} is not structurally complete: ${integrity.reason}`);
+    }
+
+    const lines = text.split('\n');
+    let firstTicketLine = lines.findIndex(line =>
+      /^\s*\[P[012]\]\s*\[(?:CORE|W2|PERF)-\d{3}\]/i.test(line)
+    );
+    if (firstTicketLine < 0) {
+      firstTicketLine = lines.findIndex(line =>
+        /^\s*NO\s+(?:VERIFIED\s+CORE|NEW\s+VERIFIED\s+SECOND[-\s]*WAVE|MATERIAL\s+PERFORMANCE\s*\/\s*STABILITY)/i.test(line)
+      );
+    }
+    if (firstTicketLine < 0) {
+      throw new Error(`${auditWaveTitle(record?.kind)} has no ticket/body boundary.`);
+    }
+
+    const headerLines = lines.slice(0, firstTicketLine);
+    const bodyLines = lines.slice(firstTicketLine);
+    const fields = new Map();
+
+    for (const line of headerLines) {
+      const match = line.match(/^\s*([A-Z][A-Z0-9_ /-]*)\s*:\s*(.*)$/);
+      if (!match) continue;
+      fields.set(match[1].trim().toUpperCase(), match[2].trim());
+    }
+
+    return {
+      record,
+      fields,
+      body: bodyLines.join('\n').trim(),
+      tickets: Number(fields.get('TICKETS') || integrity.declared || 0),
+      integrity
+    };
+  }
+
+  function sameMetadataValue(left, right) {
+    const normalize = value => normalizeAuditResponseText(value || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+    return normalize(left) === normalize(right);
+  }
+
+  function buildCompactAll3Text(records) {
+    const filtered = records.filter(Boolean);
+    if (filtered.length !== 3) {
+      throw new Error('Compact ALL_3 requires Core, Second Wave and Performance.');
+    }
+
+    const parts = filtered.map(parseAuditHandoffParts);
+    const core = parts[0];
+    const project = String(
+      core.fields.get('PROJECT_NAME') ||
+      filtered.find(record => record?.projectName)?.projectName ||
+      'PROJECT'
+    ).trim();
+
+    for (const part of parts) {
+      const candidate = String(part.fields.get('PROJECT_NAME') || project).trim();
+      if (!sameMetadataValue(candidate, project)) {
+        throw new Error(`Cross-wave project mismatch: ${project} vs ${candidate}`);
+      }
+      if (
+        filtered[0]?.runId &&
+        part.record?.runId &&
+        filtered[0].runId !== part.record.runId
+      ) {
+        throw new Error('Cross-wave run_id mismatch; refusing to merge unrelated audit runs.');
+      }
+    }
+
+    const common = {
+      TARGET: core.fields.get('TARGET') || '',
+      BASELINE: core.fields.get('BASELINE') || '',
+      GIT_CONTEXT: core.fields.get('GIT_CONTEXT') || '',
+      SAIPEN_CONTEXT: core.fields.get('SAIPEN_CONTEXT') || '',
+      HANDOFF: core.fields.get('HANDOFF') || 'IMPLEMENTATION_AGENT'
+    };
+
+    const totalTickets = parts.reduce((sum, part) => sum + part.tickets, 0);
+    const runId = filtered[0]?.runId || filtered.find(record => record?.runId)?.runId || '';
+
+    const output = [
+      `# ${project} — Audit Handoff`,
+      '',
+      ...(runId ? [`RUN_ID: ${runId}`] : []),
+      `GENERATED_AT: ${new Date().toISOString()}`,
+      `PROJECT_NAME: ${project}`,
+      ...(common.TARGET ? [`TARGET: ${common.TARGET}`] : []),
+      ...(common.BASELINE ? [`BASELINE: ${common.BASELINE}`] : []),
+      ...(common.GIT_CONTEXT ? [`GIT_CONTEXT: ${common.GIT_CONTEXT}`] : []),
+      ...(common.SAIPEN_CONTEXT ? [`SAIPEN_CONTEXT: ${common.SAIPEN_CONTEXT}`] : []),
+      `HANDOFF: ${common.HANDOFF}`,
+      'WAVES: 3',
+      `TOTAL_TICKETS: ${totalTickets}`
+    ];
+
+    const labels = [
+      ['01', 'AUDIT CORE'],
+      ['02', 'AUDIT SECOND WAVE'],
+      ['03', 'AUDIT PERFORMANCE / STABILITY / EFFECTIVENESS']
+    ];
+
+    for (let index = 0; index < parts.length; index += 1) {
+      const part = parts[index];
+      const [number, label] = labels[index];
+      const fields = part.fields;
+
+      output.push('', `## ${number} — ${label}`);
+      if (fields.get('DATE_TIME')) output.push(`DATE_TIME: ${fields.get('DATE_TIME')}`);
+      if (fields.get('AUDIT_SCOPE')) output.push(`AUDIT_SCOPE: ${fields.get('AUDIT_SCOPE')}`);
+      if (fields.get('TEST_STATUS')) output.push(`TEST_STATUS: ${fields.get('TEST_STATUS')}`);
+      if (fields.get('TEST_LIMITATION')) output.push(`TEST_LIMITATION: ${fields.get('TEST_LIMITATION')}`);
+      if (fields.get('VERIFIED_INSTEAD')) output.push(`VERIFIED_INSTEAD: ${fields.get('VERIFIED_INSTEAD')}`);
+      if (fields.get('STATUS')) output.push(`STATUS: ${fields.get('STATUS')}`);
+      output.push(`TICKETS: ${part.tickets}`);
+
+      const deltas = [];
+      for (const key of ['TARGET', 'BASELINE', 'GIT_CONTEXT', 'SAIPEN_CONTEXT']) {
+        const value = fields.get(key) || '';
+        if (value && !sameMetadataValue(value, common[key])) {
+          deltas.push(`${key}: ${value}`);
+        }
+      }
+
+      const coreBaseline = fields.get('CORE_BASELINE') || '';
+      if (coreBaseline && !sameMetadataValue(coreBaseline, common.BASELINE)) {
+        deltas.push(`CORE_BASELINE: ${coreBaseline}`);
+      }
+
+      const previousBaseline = fields.get('PREVIOUS_BASELINE') || '';
+      if (previousBaseline && !sameMetadataValue(previousBaseline, common.BASELINE)) {
+        deltas.push(`PREVIOUS_BASELINE: ${previousBaseline}`);
+      }
+
+      if (deltas.length) {
+        output.push('CONTEXT_DELTA:');
+        for (const delta of deltas) output.push(`- ${delta}`);
+      }
+
+      output.push('', part.body);
+    }
+
+    return output.join('\n').replace(/\n{4,}/g, '\n\n\n').trim() + '\n';
+  }
+
+  function buildCombinedAuditText(records) {
+    return buildCompactAll3Text(records);
+  }
+
+  async function autoSaveCombinedAuditIfReady(conversationKey = autoBoundConversationKey || currentConversationKey(), options = {}) {
+    if (!state?.autoSaveAuditFiles && !options.force) return false;
+    const records = currentChatAuditRecords(conversationKey);
+    if (records.length !== 3) return false;
+    const performanceRecord = records.find(record => record.kind === 'performance');
+    if (performanceRecord?.combinedSavedAt && !options.force) return true;
+    const projectName = records.find(record => record.projectName)?.projectName || autoRuntime?.projectName || 'PROJECT';
+    const runStartedAt = records[0]?.runStartedAt || autoRuntime?.startedAt || Date.now();
+    try {
+      const filename = combinedAuditFilename(projectName, runStartedAt);
+      await writeTextFileToAuditFolder(filename, buildCombinedAuditText(records));
+      patchAuditResult('performance', next => {
+        next.combinedSavedAt = Date.now();
+        next.combinedFileName = filename;
+      }, conversationKey, { expectedRunId: String(performanceRecord?.runId || '') });
+      auditDirectoryState = 'ready';
+      auditDirectoryMessage = `saved all 3 waves + ${filename}.`;
+      renderAuditFolderState();
+      renderAutoAuditState();
+      return true;
+    } catch (error) {
+      auditDirectoryState = /not linked|permission/i.test(String(error?.message || '')) ? 'permission' : 'error';
+      auditDirectoryMessage = error?.message || 'combined audit save failed.';
+      renderAuditFolderState();
+      renderAutoAuditState();
+      return false;
+    }
+  }
+
+  async function flushCurrentAuditResultsToFolder(options = {}) {
+    const conversationKey = autoBoundConversationKey || currentConversationKey();
+    const records = currentChatAuditRecords(conversationKey);
+    let saved = 0;
+    for (const record of records) {
+      if (await autoSaveAuditRecord(record, { force: Boolean(options.force) })) saved += 1;
+    }
+    const ready = records.length;
+    const combined = ready === 3
+      ? await autoSaveCombinedAuditIfReady(conversationKey, { force: Boolean(options.force) })
+      : false;
+    return { ready, saved, combined };
+  }
+
+  function currentConversationId() {
+    return location.pathname.match(/^\/c\/([^/?#]+)/i)?.[1] || '';
+  }
+
+  function applyLocalConversationTitle(name) {
+    const cleaned = sanitizeProjectIdentity(name);
+    if (!cleaned) return false;
+    try {
+      document.title = cleaned;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function sidebarCurrentConversationLink() {
+    const conversationId = currentConversationId();
+    if (!conversationId) return null;
+    const wanted = `/c/${conversationId}`;
+
+    const cached = projectTitleObserverLink;
+    if (cached?.isConnected) {
+      try {
+        const url = new URL(cached.getAttribute('href'), location.href);
+        if (url.origin === location.origin && url.pathname === wanted) return cached;
+      } catch (_) { }
+    }
+
+    for (const link of document.querySelectorAll('a[href]')) {
+      try {
+        const url = new URL(link.getAttribute('href'), location.href);
+        if (url.origin !== location.origin) continue;
+        if (url.pathname === wanted) return link;
+      } catch (_) { }
+    }
+    return null;
+  }
+
+
+  function normalizeConversationTitle(value) {
+    return cleanProjectName(String(value || '')
+      .replace(/\s+/g, ' ')
+      .trim());
+  }
+
+  function currentSidebarConversationTitle() {
+    const link = sidebarCurrentConversationLink();
+    if (!link) return '';
+
+    const candidates = [
+      String(link.getAttribute('aria-label') || '').trim(),
+      String(link.getAttribute('title') || '').trim()
+    ];
+
+    for (const node of link.querySelectorAll('span, div')) {
+      if (!isVisible(node)) continue;
+      const value = String(node.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!value || value.length > 120) continue;
+      candidates.push(value);
+    }
+
+    const ownText = String(link.textContent || '').replace(/\s+/g, ' ').trim();
+    if (ownText && ownText.length <= 120) candidates.push(ownText);
+
+    const noise = /^(more|options|menu|share|rename|archive|delete|chat|conversation|ещ[её]|параметр|veel)$/i;
+    const cleaned = candidates
+      .map(normalizeConversationTitle)
+      .filter(value => value && !noise.test(value));
+
+    // Conversation title is normally the longest meaningful text inside the
+    // current sidebar link. Avoid trusting document.title because ACB itself
+    // writes that optimistically before ChatGPT server state settles.
+    cleaned.sort((a, b) => b.length - a.length);
+    return cleaned[0] || '';
+  }
+
+  function sanitizeConversationLabel(value) {
+    const cleaned = normalizeConversationTitle(value);
+    if (!cleaned) return '';
+
+    if (/^(?:CHATGPT|NEW CHAT|TEMPORARY CHAT|CHAT|PROJECT)$/i.test(cleaned)) return '';
+    if (/^(?:SKIP TO (?:CONTENT|MAIN CONTENT)|VIEW CHAT|IMAGES|PLUGINS|DEEP RESEARCH|SETTINGS|HELP|LOG IN|SIGN UP|SEE PLANS AND PRICING)$/i.test(cleaned)) return '';
+    if (looksOpaqueIdentity(cleaned)) return '';
+    if (/^(?:https?:\/\/|blob:|data:)/i.test(cleaned)) return '';
+    return cleaned.slice(0, 80);
+  }
+
+
+  function documentConversationLabel() {
+    let value = String(document.title || '').trim();
+    value = value.replace(/\s+[-–—]\s+(?:Brave|Google Chrome|Firefox|Microsoft Edge)\s*$/i, '');
+    return sanitizeConversationLabel(value);
+  }
+
+  function currentMiniIdentity() {
+    if (chatGPTRootIsQuarantined()) return { label: 'CHAT', kind: 'auth' };
+
+    const project = sanitizeProjectIdentity(
+      autoRuntime?.projectName || projectNameFromComposerAttachments() || ''
+    );
+    if (project) return { label: project, kind: 'project' };
+
+    const chatTitle =
+      sanitizeConversationLabel(currentSidebarConversationTitle()) ||
+      documentConversationLabel();
+
+    if (chatTitle) return { label: chatTitle, kind: 'chat-title' };
+    return { label: 'CHAT', kind: 'chat' };
+  }
+
+
+  function currentConversationTitleMatches(name) {
+    const wanted = normalizeConversationTitle(name);
+    if (!wanted) return false;
+
+    const sidebar = currentSidebarConversationTitle();
+    if (!sidebar) return false;
+
+    return sidebar.toLowerCase() === wanted.toLowerCase();
+  }
+
+  function renameGuardContextValid(projectName, runStartedAt, conversationKey) {
+    if (!autoRuntime || !state?.autoRenameChat) return false;
+    if (detectSite().key !== 'chatgpt') return false;
+
+    const wanted = sanitizeProjectIdentity(projectName);
+    if (!wanted) return false;
+
+    const sameProject = sanitizeProjectIdentity(autoRuntime.projectName) === wanted;
+    const sameRun = !runStartedAt || Number(autoRuntime.startedAt || 0) === Number(runStartedAt);
+    const currentKey = currentConversationKey();
+    const compatibleKey =
+      !conversationKey ||
+      conversationKey === currentKey ||
+      (
+        String(conversationKey).startsWith('draft:') &&
+        currentKey.startsWith('c:') &&
+        sameRun &&
+        sameProject
+      );
+
+    return sameProject && sameRun && compatibleKey;
+  }
+
+  function scheduleConversationTitleGuard(projectName, options = {}) {
+    const cleaned = sanitizeProjectIdentity(projectName);
+    if (
+      !cleaned ||
+      !state?.autoRenameChat ||
+      detectSite().key !== 'chatgpt' ||
+      !currentConversationId() ||
+      chatGPTRootIsQuarantined()
+    ) {
+      disconnectProjectTitleObserver();
+      return;
+    }
+
+    const conversationKey = String(
+      options.conversationKey ||
+      autoBoundConversationKey ||
+      currentConversationKey()
+    );
+    const runStartedAt = Number(options.runStartedAt || autoRuntime?.startedAt || 0);
+
+    if (
+      conversationTitleGuardToken &&
+      conversationTitleGuardProject === cleaned &&
+      conversationTitleGuardConversationKey === conversationKey &&
+      Number(conversationTitleGuardRunStartedAt || 0) === Number(runStartedAt || 0) &&
+      Date.now() - conversationTitleGuardStartedAt < CHAT_TITLE_GUARD_TTL_MS
+    ) {
+      if (renameGuardContextValid(cleaned, runStartedAt, conversationKey)) {
+        applyPersistentLocalProjectTitle(cleaned);
+      }
+      return;
+    }
+
+    const token = `${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 9)}`;
+    conversationTitleGuardToken = token;
+    conversationTitleGuardStartedAt = Date.now();
+    conversationTitleGuardProject = cleaned;
+    conversationTitleGuardConversationKey = conversationKey;
+    conversationTitleGuardRunStartedAt = runStartedAt;
+
+    if (!renameGuardContextValid(cleaned, runStartedAt, conversationKey)) return;
+    applyPersistentLocalProjectTitle(cleaned);
+
+    for (const delay of CHAT_TITLE_GUARD_DELAYS_MS) {
+      setTimeout(() => {
+        if (conversationTitleGuardToken !== token) return;
+        if (!autoRuntime || !state?.autoRenameChat) return;
+
+        // Route/run ownership must be checked at callback time, not only when the
+        // timer was scheduled. Otherwise a delayed 15s/60s rename can wake after
+        // the user moved to another chat and PATCH that unrelated conversation.
+        if (!renameGuardContextValid(cleaned, runStartedAt, conversationKey)) return;
+
+        applyPersistentLocalProjectTitle(cleaned);
+
+        // ChatGPT may generate/replace its own title several seconds after the
+        // first message. Reassert the server title only at sparse guard points;
+        // rate arbitration keeps multiple ACB tabs from creating request storms.
+        if (delay >= 15000 && currentConversationId()) {
+          const expectedConversationId = currentConversationId();
+          renameCurrentConversationViaBackend(cleaned, { force: true })
+            .then(ok => {
+              if (
+                ok &&
+                currentConversationId() === expectedConversationId &&
+                renameGuardContextValid(cleaned, runStartedAt, conversationKey)
+              ) {
+                markConversationTitlePersisted(cleaned);
+              }
+            })
+            .catch(() => { });
+        }
+      }, delay);
+    }
+  }
+
+  function setNativeTextInputValue(input, value) {
+    if (!input) return false;
+    const proto = input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    if (setter) setter.call(input, value);
+    else input.value = value;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  }
+
+  async function renameCurrentConversationViaUi(name) {
+    // v0.0.37: intentionally disabled for automation.
+    // ChatGPT's sidebar action menu is not a stable API surface: depending on
+    // viewport/build it may expose Share/View files/Pin/Archive/Delete but no
+    // Rename. Clicking generic "more" buttons can leave menus open or even hit
+    // unrelated navigation controls. Automatic rename must never click UI.
+    return false;
+  }
+
+  async function waitForVisibleConversationTitle(name) {
+    const cleaned = normalizeConversationTitle(name);
+    if (!cleaned) return false;
+
+    for (const delay of CHAT_TITLE_VERIFY_DELAYS_MS) {
+      if (delay) await sleep(delay);
+      if (currentConversationTitleMatches(cleaned)) return true;
+    }
+    return false;
+  }
+
+  function markConversationTitlePersisted(name) {
+    const cleaned = sanitizeProjectIdentity(name);
+    if (!cleaned || !autoRuntime) return false;
+
+    autoRuntime.renameAppliedName = cleaned;
+    autoRuntime.renamePersistedName = cleaned;
+    autoRuntime.renamePersistedAt = Date.now();
+    autoRuntime.renameAttemptName = cleaned;
+    autoRuntime.renameAttemptCount = 0;
+    saveAutoRuntime({ pauseOnFailure: false });
+    return true;
+  }
+
+  function readRenameRateState() {
+    try {
+      const raw = GM_getValue(CHAT_RENAME_RATE_STATE_KEY, null);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (!parsed || parsed.version !== 2) {
+        return {
+          version: 2,
+          cooldownUntil: 0,
+          globalLastAt: 0,
+          lastByConversation: {}
+        };
+      }
+      return {
+        version: 2,
+        cooldownUntil: Math.max(0, Number(parsed.cooldownUntil) || 0),
+        globalLastAt: Math.max(0, Number(parsed.globalLastAt) || 0),
+        lastByConversation: parsed.lastByConversation && typeof parsed.lastByConversation === 'object'
+          ? parsed.lastByConversation
+          : {}
+      };
+    } catch (_) {
+      return {
+        version: 2,
+        cooldownUntil: 0,
+        globalLastAt: 0,
+        lastByConversation: {}
+      };
+    }
+  }
+
+  function writeRenameRateState(stateValue) {
+    try {
+      GM_setValue(CHAT_RENAME_RATE_STATE_KEY, JSON.stringify(stateValue));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function renameBackendCooldownRemaining() {
+    const rate = readRenameRateState();
+    return Math.max(0, Number(rate.cooldownUntil || 0) - Date.now());
+  }
+
+  function acquireRenameBackendSlot(conversationId) {
+    if (!conversationId) return false;
+
+    const now = Date.now();
+    const rate = readRenameRateState();
+
+    if (Number(rate.cooldownUntil || 0) > now) return false;
+    if (now - Number(rate.globalLastAt || 0) < CHAT_RENAME_GLOBAL_MIN_GAP_MS) return false;
+
+    const lastForConversation = Number(rate.lastByConversation?.[conversationId] || 0);
+    if (now - lastForConversation < CHAT_RENAME_CONVERSATION_MIN_GAP_MS) return false;
+
+    const token = `${autoTabId}:${now}:${Math.random().toString(36).slice(2, 8)}`;
+
+    rate.globalLastAt = now;
+    rate.lastByConversation = {
+      ...rate.lastByConversation,
+      [conversationId]: now
+    };
+    rate.claimToken = token;
+
+    // Bound state size if the browser has seen many chats.
+    const entries = Object.entries(rate.lastByConversation)
+      .sort((a, b) => Number(b[1]) - Number(a[1]))
+      .slice(0, 80);
+    rate.lastByConversation = Object.fromEntries(entries);
+
+    if (!writeRenameRateState(rate)) return false;
+
+    // Best-effort cross-tab arbitration. GM storage is not a CAS primitive,
+    // but read-back prevents most simultaneous multi-window bursts.
+    const verified = readRenameRateState();
+    return verified.claimToken === token;
+  }
+
+  function activateRename429CircuitBreaker(response = null) {
+    const now = Date.now();
+    let retryMs = CHAT_RENAME_429_COOLDOWN_MS;
+
+    try {
+      const header = String(response?.headers?.get?.('Retry-After') || '').trim();
+      if (/^\d+$/.test(header)) {
+        retryMs = Math.max(retryMs, Number(header) * 1000);
+      } else if (header) {
+        const absolute = Date.parse(header);
+        if (Number.isFinite(absolute)) retryMs = Math.max(retryMs, absolute - now);
+      }
+    } catch (_) { }
+
+    const rate = readRenameRateState();
+    rate.cooldownUntil = Math.max(Number(rate.cooldownUntil || 0), now + Math.max(60000, retryMs));
+    writeRenameRateState(rate);
+
+    if (now - renameRateLimitNoticeAt > 60000) {
+      renameRateLimitNoticeAt = now;
+      setStatus(
+        'Chat title rename hit ChatGPT rate limiting. Rename requests are globally suspended across ACB tabs; audits continue normally.',
+        'warning'
+      );
+    }
+  }
+
+  async function chatGPTSessionAccessToken() {
+    try {
+      const response = await fetch(`${location.origin}/api/auth/session`, {
+        method: 'GET',
+        credentials: 'include',
+        cache: 'no-store',
+        headers: { Accept: 'application/json' }
+      });
+      if (!response.ok) return '';
+      const payload = await response.json().catch(() => null);
+      return String(payload?.accessToken || payload?.access_token || '');
+    } catch (_) {
+      return '';
+    }
+  }
+
+  async function patchChatGPTConversationTitle(conversationId, title, accessToken = '') {
+    const headers = {
+      Accept: 'application/json',
+      'Content-Type': 'application/json'
+    };
+    if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+
+    return fetch(`${location.origin}/backend-api/conversation/${encodeURIComponent(conversationId)}`, {
+      method: 'PATCH',
+      credentials: 'include',
+      cache: 'no-store',
+      headers,
+      body: JSON.stringify({ title })
+    });
+  }
+
+  async function renameCurrentConversationViaBackend(name, options = {}) {
+    if (detectSite().key !== 'chatgpt' || chatGPTRootIsQuarantined()) return false;
+
+    const cleaned = sanitizeProjectIdentity(name);
+    const conversationId = currentConversationId();
+    if (!cleaned || !conversationId) return false;
+
+    if (!options.force && autoRuntime?.renamePersistedName === cleaned && Number(autoRuntime?.renamePersistedAt) > 0) {
+      return true;
+    }
+
+    if (!acquireRenameBackendSlot(conversationId)) return false;
+
+    let response = null;
+    try {
+      response = await patchChatGPTConversationTitle(conversationId, cleaned);
+
+      // Some ChatGPT builds accept the authenticated same-origin cookie request
+      // directly; others require the bearer token already available to the web
+      // session. Fetch it only after an auth failure and never persist/log it.
+      if (response.status === 401 || response.status === 403) {
+        const accessToken = await chatGPTSessionAccessToken();
+        if (accessToken) {
+          response = await patchChatGPTConversationTitle(conversationId, cleaned, accessToken);
+        }
+      }
+
+      if (response.status === 429) {
+        activateRename429CircuitBreaker(response);
+        return false;
+      }
+
+      if (!response.ok) return false;
+
+      const payload = await response.clone().json().catch(() => null);
+      if (payload && payload.success === false) return false;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+
+  function localSidebarTitleTextNode(link = sidebarCurrentConversationLink()) {
+    if (!link) return null;
+
+    const walker = document.createTreeWalker(
+      link,
+      NodeFilter.SHOW_TEXT,
+      {
+        acceptNode(node) {
+          const value = normalizeConversationTitle(node.nodeValue || '');
+          if (!value || value.length > 120) return NodeFilter.FILTER_REJECT;
+          const parent = node.parentElement;
+          if (!parent) return NodeFilter.FILTER_REJECT;
+          if (parent.closest('button, [role="button"], svg')) return NodeFilter.FILTER_REJECT;
+          if (/^(more|options|menu|share|rename|archive|delete|chat|conversation)$/i.test(value)) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      }
+    );
+
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.sort((a, b) =>
+      normalizeConversationTitle(b.nodeValue || '').length -
+      normalizeConversationTitle(a.nodeValue || '').length
+    );
+    return nodes[0] || null;
+  }
+
+  function applyLocalSidebarConversationTitle(name) {
+    const cleaned = sanitizeProjectIdentity(name);
+    if (!cleaned || !currentConversationId()) return false;
+
+    const link = sidebarCurrentConversationLink();
+    if (!link) return false;
+
+    const node = localSidebarTitleTextNode(link);
+    if (!node) return false;
+
+    if (normalizeConversationTitle(node.nodeValue || '').toLowerCase() !== cleaned.toLowerCase()) {
+      node.nodeValue = cleaned;
+    }
+
+    link.dataset.acbProjectTitle = cleaned;
+    return true;
+  }
+
+
+  function disconnectProjectTitleObserver() {
+    if (projectTitleRepairTimer) {
+      clearTimeout(projectTitleRepairTimer);
+      projectTitleRepairTimer = 0;
+    }
+    if (projectTitleObserver) {
+      projectTitleObserver.disconnect();
+      projectTitleObserver = null;
+    }
+    projectTitleObserverLink = null;
+  }
+
+  function scheduleProjectTitleRepair(delay = 70) {
+    if (projectTitleRepairTimer) return;
+    projectTitleRepairTimer = setTimeout(() => {
+      projectTitleRepairTimer = 0;
+
+      if (
+        !state?.autoRenameChat ||
+        !autoRuntime?.projectName ||
+        !currentConversationId() ||
+        chatGPTRootIsQuarantined()
+      ) {
+        disconnectProjectTitleObserver();
+        return;
+      }
+
+      applyPersistentLocalProjectTitle(autoRuntime.projectName);
+      ensureProjectTitleObserver();
+    }, Math.max(20, Number(delay) || 70));
+  }
+
+  function ensureProjectTitleObserver() {
+    if (
+      detectSite().key !== 'chatgpt' ||
+      !state?.autoRenameChat ||
+      !autoRuntime?.projectName ||
+      !currentConversationId() ||
+      chatGPTRootIsQuarantined()
+    ) {
+      disconnectProjectTitleObserver();
+      return false;
+    }
+
+    const link = sidebarCurrentConversationLink();
+    const navRoot = link?.closest('nav, aside') || link?.parentElement || null;
+    const titleNode = document.querySelector('title');
+
+    if (
+      projectTitleObserver &&
+      projectTitleObserverLink === link &&
+      (!navRoot || navRoot.isConnected)
+    ) return true;
+
+    disconnectProjectTitleObserver();
+
+    projectTitleObserver = new MutationObserver(() => scheduleProjectTitleRepair(70));
+    projectTitleObserverLink = link || null;
+
+    if (titleNode) {
+      projectTitleObserver.observe(titleNode, {
+        childList: true,
+        characterData: true,
+        subtree: true
+      });
+    }
+
+    if (navRoot) {
+      projectTitleObserver.observe(navRoot, {
+        childList: true,
+        characterData: true,
+        subtree: true
+      });
+    }
+
+    return Boolean(titleNode || navRoot);
+  }
+
+  function applyPersistentLocalProjectTitle(name = autoRuntime?.projectName || '') {
+    const cleaned = sanitizeProjectIdentity(name);
+    if (!cleaned || detectSite().key !== 'chatgpt' || !currentConversationId() || chatGPTRootIsQuarantined()) return false;
+
+    const now = Date.now();
+    const elapsed = now - lastLocalTitleApplyAt;
+    if (elapsed < LOCAL_TITLE_REAPPLY_MIN_MS) {
+      scheduleProjectTitleRepair(Math.max(30, LOCAL_TITLE_REAPPLY_MIN_MS - elapsed + 20));
+      return true;
+    }
+
+    const documentMatches = normalizeConversationTitle(document.title).toLowerCase() === cleaned.toLowerCase();
+    const sidebarMatches = currentConversationTitleMatches(cleaned);
+    if (sidebarMatches && documentMatches) {
+      lastLocalTitleApplyAt = now;
+      return true;
+    }
+
+    lastLocalTitleApplyAt = now;
+    applyLocalConversationTitle(cleaned);
+    applyLocalSidebarConversationTitle(cleaned);
+    ensureProjectTitleObserver();
+    return true;
+  }
+
+
+  // RENAME SAFETY INVARIANT:
+  // Project naming may PATCH only the current ChatGPT conversation title.
+  // It must never navigate, delete/archive, or expose authentication material.
+  async function maybeRenameConversation(name, options = {}) {
+    if (!state?.autoRenameChat || detectSite().key !== 'chatgpt' || !autoRuntime) return false;
+
+    const cleaned = sanitizeProjectIdentity(name);
+    if (!cleaned) return false;
+
+    updateRuntimeProjectName(
+      cleaned,
+      options.source || autoRuntime.projectNameSource || 'artifact'
+    );
+
+    const requestedConversationKey = String(
+      options.conversationKey || autoBoundConversationKey || currentConversationKey()
+    );
+    const requestedRunStartedAt = Number(options.runStartedAt || autoRuntime.startedAt || 0);
+    if (!renameGuardContextValid(cleaned, requestedRunStartedAt, requestedConversationKey)) {
+      return false;
+    }
+
+    // Immediate optimistic UI keeps the project identity stable while ChatGPT is
+    // still creating/hydrating the server-side conversation.
+    applyPersistentLocalProjectTitle(cleaned);
+    scheduleConversationTitleGuard(cleaned, {
+      conversationKey: options.conversationKey || autoBoundConversationKey || currentConversationKey(),
+      runStartedAt: options.runStartedAt || autoRuntime.startedAt || 0
+    });
+
+    const conversationId = currentConversationId();
+    if (!conversationId) {
+      autoRuntime.renameAppliedName = cleaned;
+      autoRuntime.renameAttemptName = cleaned;
+      saveAutoRuntime({ pauseOnFailure: false });
+      return true;
+    }
+
+    const sameAttempt = autoRuntime.renameAttemptName === cleaned;
+    autoRuntime.renameAppliedName = cleaned;
+    autoRuntime.renameAttemptName = cleaned;
+    autoRuntime.renameAttemptCount = sameAttempt
+      ? Math.min(CHAT_RENAME_MAX_ATTEMPTS, Number(autoRuntime.renameAttemptCount || 0) + 1)
+      : 1;
+    saveAutoRuntime({ pauseOnFailure: false });
+
+    const persisted = await renameCurrentConversationViaBackend(cleaned, {
+      force: Boolean(options.forceBackend)
+    });
+
+    if (persisted) {
+      // The PATCH targets the conversation id captured before the await. If the
+      // user navigated meanwhile, do not stamp the newly-bound runtime as though
+      // its own title had been persisted by that old request.
+      if (
+        currentConversationId() === conversationId &&
+        renameGuardContextValid(cleaned, requestedRunStartedAt, requestedConversationKey)
+      ) {
+        markConversationTitlePersisted(cleaned);
+        applyPersistentLocalProjectTitle(cleaned);
+      }
+      return true;
+    }
+
+    return false;
+  }
+
+  function captureCompletedAudit(kind, text, gateState = 'complete', sourceUserId = '') {
+    if (!kind || !text) return null;
+
+    const stage = kind === 'core'
+      ? 'wait-core'
+      : kind === 'second'
+        ? 'wait-second'
+        : kind === 'performance'
+          ? 'wait-performance'
+          : '';
+
+    if (gateState === 'complete') {
+      const integrity = auditHandoffIntegrity(stage, text);
+      if (!integrity.valid) {
+        setStatus(
+          `${auditWaveTitle(kind)} claimed COMPLETE but failed structural integrity (${integrity.reason}). It was NOT cached or saved; Auto3 will continue the same wave.`,
+          'warning'
+        );
+        return null;
+      }
+    }
+
+    const conversationKey = autoBoundConversationKey || currentConversationKey();
+    const handoffProject = projectNameFromAuditText(text);
+    const existingProject = sanitizeProjectIdentity(autoRuntime?.projectName || '');
+    const projectName = handoffProject
+      ? updateRuntimeProjectName(handoffProject, 'handoff')
+      : existingProject;
+    const existing = readAuditResult(kind, conversationKey);
+    const runId = autoRuntime?.runId || ensureAuditRunId();
+    if (!runId) {
+      setStatus(`${auditWaveTitle(kind)} is COMPLETE, but a durable audit run id could not be established. The handoff was not cached/saved and the wave will not advance.`, 'warning');
+      return null;
+    }
+    const sameExisting = existing?.text === String(text).trim() && existing?.runId === runId;
+
+    const record = {
+      version: 1,
+      conversationKey,
+      runId,
+      sourceUserId: String(sourceUserId || waveUserId(kind) || ''),
+      bridgeReceipt: sameExisting && existing?.bridgeReceipt
+        ? existing.bridgeReceipt
+        : createBridgeReceipt(runId, kind),
+      kind,
+      wave: auditWaveTitle(kind),
+      projectName: projectName || 'PROJECT',
+      runStartedAt: autoRuntime?.startedAt || Date.now(),
+      completedAt: sameExisting
+        ? Number(existing?.completedAt || Date.now())
+        : Date.now(),
+      gateState: String(gateState || 'complete'),
+      text: String(text).trim(),
+      savedAt: sameExisting ? Number(existing?.savedAt || 0) : 0,
+      savedFileName: sameExisting ? String(existing?.savedFileName || '') : '',
+      saveError: '',
+      bridgeQueuedAt: sameExisting ? Number(existing?.bridgeQueuedAt || 0) : 0,
+      bridgeSavedAt: sameExisting ? Number(existing?.bridgeSavedAt || 0) : 0,
+      bridgeFiles: sameExisting && Array.isArray(existing?.bridgeFiles) ? existing.bridgeFiles : [],
+      bridgeError: '',
+      testStatus: auditTestMetadata(text).status,
+      testLimitation: auditTestMetadata(text).limitation,
+      verifiedInstead: auditTestMetadata(text).verifiedInstead
+    };
+    // Cache acceptance is the commit point for a COMPLETE handoff. If the
+    // durable runtime rejected this record (newer run/reset barrier) or userscript
+    // storage failed, do not continue into rename/disk side effects with evidence
+    // that the current conversation no longer owns.
+    if (!writeAuditResult(record)) {
+      renderAutoAuditState();
+      return null;
+    }
+
+    if (projectName) {
+      const renameContext = {
+        source: 'handoff',
+        conversationKey,
+        runStartedAt: autoRuntime?.startedAt || 0
+      };
+      maybeRenameConversation(projectName, renameContext).catch(() => { });
+      scheduleConversationTitleGuard(projectName, renameContext);
+    }
+    if (state?.autoSaveAuditFiles) {
+      if (state.bridgeEnabled) {
+        if (!sameExisting || !Number(existing?.bridgeSavedAt)) {
+          enqueueBridgeAuditRecord(record);
+        }
+      } else {
+        // Browser File System Access remains an optional fallback when the
+        // localhost bridge is explicitly disabled.
+        autoSaveAuditRecord(record).then(() => {
+          if (kind === 'performance') autoSaveCombinedAuditIfReady(conversationKey).catch(() => { });
+        }).catch(() => { });
+      }
+    }
+    renderAutoAuditState();
+    return record;
+  }
+
+  function visibleAuditLineage(turns = getChatGPTTurns(), options = {}) {
+    let startIndex = -1;
+
+    if (options.respectResetBarrier !== false && autoRuntime?.resetBarrierActive) {
+      const barrierId = String(autoRuntime.resetBarrierUserId || '');
+      if (!barrierId) return { core: null, second: null, performance: null, blockedByReset: true };
+      startIndex = turns.findIndex(turn => getTurnId(turn) === barrierId);
+      if (startIndex < 0) return { core: null, second: null, performance: null, blockedByReset: true };
+    }
+
+    let core = null;
+    let second = null;
+    let performance = null;
+
+    for (let index = startIndex + 1; index < turns.length; index += 1) {
+      const turn = turns[index];
+      if (turnRole(turn) !== 'user') continue;
+      const kind = classifyAuditTurn(turn);
+      if (!kind) continue;
+
+      // A CONTINUE command is recovery inside an already established wave. It
+      // cannot create/replace a root after reload, and an orphan continuation is
+      // deliberately non-resumable rather than guessed into a new run.
+      if (auditTurnIsContinuation(turn)) continue;
+
+      if (kind === 'core') {
+        core = turn;
+        second = null;
+        performance = null;
+        continue;
+      }
+      if (kind === 'second' && core) {
+        second = turn;
+        performance = null;
+        continue;
+      }
+      if (kind === 'performance' && core && second) performance = turn;
+    }
+
+    return { core, second, performance, blockedByReset: false };
+  }
+
+  function backfillVisibleCompletedAuditResults() {
+    if (detectSite().key !== 'chatgpt') return 0;
+    const turns = getChatGPTTurns();
+    const lineage = visibleAuditLineage(turns);
+    if (lineage.blockedByReset || !lineage.core) return 0;
+
+    let captured = 0;
+    const specs = [
+      ['core', 'wait-core'],
+      ['second', 'wait-second'],
+      ['performance', 'wait-performance']
+    ];
+
+    for (const [kind, stage] of specs) {
+      const userTurn = lineage[kind];
+      if (!userTurn) continue;
+
+      const sourceUserId = getTurnId(userTurn);
+      const existing = readAuditResult(kind);
+      if (existing?.text && sourceUserId && existing.sourceUserId === sourceUserId) continue;
+
+      const assistant = assistantTurnAfter(userTurn, turns);
+      if (!assistant) continue;
+      const gate = responseGateFromAssistantTurn(stage, assistant);
+      if (gate.state !== 'complete' || !gate.text) continue;
+
+      if (captureCompletedAudit(kind, gate.text, 'complete', sourceUserId)) {
+        captured += 1;
+      }
+    }
+    return captured;
+  }
+
   function emptyAutoRuntime(options = {}) {
     const enabledDefault = options.enabled !== undefined
       ? Boolean(options.enabled)
       : false;
 
     return {
-      version: 4,
+      version: 5,
       conversationKey: '',
       enabled: enabledDefault,
       stage: 'idle',
@@ -2344,18 +6149,22 @@
       secondUserId: '',
       performanceUserId: '',
       expectedKind: '',
+      runId: '',
       startedAt: 0,
       waitStartedAt: 0,
       updatedAt: Date.now(),
       stableResponseKey: '',
       stableSince: 0,
       baselineAssistantKey: '',
+      resetBarrierActive: false,
+      resetBarrierUserId: '',
       pausedReason: '',
       continuationKind: '',
       continuationReason: '',
       continuationPreviousUserId: '',
       partialContinuations: { core: 0, second: 0, performance: 0 },
       stallNudges: { core: 0, second: 0, performance: 0 },
+      sidecarRecoveries: { core: 0, second: 0, performance: 0 },
       continueGeneratingClicks: { core: 0, second: 0, performance: 0 },
       retryClicks: { core: 0, second: 0, performance: 0 },
       idleStallKey: '',
@@ -2366,20 +6175,43 @@
       pendingSendStartedAt: 0,
       pendingSendRetries: 0,
       pendingSendClickArmed: false,
+      stageAssistantId: '',
+      anchorMissingSince: 0,
+      projectName: '',
+      projectNameSource: '',
+      renameAppliedName: '',
+      renamePersistedName: '',
+      renamePersistedAt: 0,
+      renameAttemptName: '',
+      renameAttemptCount: 0,
       completeAt: 0
     };
   }
 
   function normalizeAutoRuntime(parsed, conversationKey = '') {
     if (!parsed || typeof parsed !== 'object' || typeof parsed.stage !== 'string') return null;
-    if (![1, 2, 3, 4].includes(parsed.version)) return null;
+    if (![1, 2, 3, 4, 5].includes(parsed.version)) return null;
+    if (![
+      'idle',
+      'wait-core',
+      'sending-second',
+      'await-second-user',
+      'wait-second',
+      'sending-performance',
+      'await-performance-user',
+      'wait-performance',
+      'sending-continuation',
+      'await-continuation-user',
+      'complete',
+      'paused'
+    ].includes(parsed.stage)) return null;
 
     const normalized = {
       ...emptyAutoRuntime({
         enabled: parsed.enabled !== undefined ? parsed.enabled : false
       }),
       ...parsed,
-      version: 4
+      version: 5
     };
 
     if (conversationKey) normalized.conversationKey = conversationKey;
@@ -2394,11 +6226,13 @@
     });
     normalized.partialContinuations = normalizeCounterMap(parsed.partialContinuations);
     normalized.stallNudges = normalizeCounterMap(parsed.stallNudges);
+    normalized.sidecarRecoveries = normalizeCounterMap(parsed.sidecarRecoveries);
     normalized.continueGeneratingClicks = normalizeCounterMap(parsed.continueGeneratingClicks);
     normalized.retryClicks = normalizeCounterMap(parsed.retryClicks);
     normalized.continuationKind = String(parsed.continuationKind || '');
     normalized.continuationReason = String(parsed.continuationReason || '');
     normalized.continuationPreviousUserId = String(parsed.continuationPreviousUserId || '');
+    normalized.runId = String(parsed.runId || '');
     normalized.idleStallKey = String(parsed.idleStallKey || '');
     normalized.idleStallSince = Math.max(0, Number(parsed.idleStallSince) || 0);
     normalized.pendingSendReceipt = String(parsed.pendingSendReceipt || '');
@@ -2407,6 +6241,17 @@
     normalized.pendingSendStartedAt = Math.max(0, Number(parsed.pendingSendStartedAt) || 0);
     normalized.pendingSendRetries = Math.max(0, Number(parsed.pendingSendRetries) || 0);
     normalized.pendingSendClickArmed = Boolean(parsed.pendingSendClickArmed);
+    normalized.resetBarrierActive = Boolean(parsed.resetBarrierActive);
+    normalized.resetBarrierUserId = String(parsed.resetBarrierUserId || '');
+    normalized.stageAssistantId = String(parsed.stageAssistantId || '');
+    normalized.anchorMissingSince = Math.max(0, Number(parsed.anchorMissingSince) || 0);
+    normalized.projectName = sanitizeProjectIdentity(parsed.projectName || '');
+    normalized.projectNameSource = normalized.projectName ? String(parsed.projectNameSource || '') : '';
+    normalized.renameAppliedName = normalized.projectName ? sanitizeProjectIdentity(parsed.renameAppliedName || '') : '';
+    normalized.renamePersistedName = normalized.projectName ? sanitizeProjectIdentity(parsed.renamePersistedName || '') : '';
+    normalized.renamePersistedAt = normalized.renamePersistedName ? Math.max(0, Number(parsed.renamePersistedAt) || 0) : 0;
+    normalized.renameAttemptName = normalized.projectName ? sanitizeProjectIdentity(parsed.renameAttemptName || '') : '';
+    normalized.renameAttemptCount = Math.max(0, Number(parsed.renameAttemptCount) || 0);
     return normalized;
   }
 
@@ -2416,6 +6261,660 @@
 
   function autoLeaseStorageKey(conversationKey) {
     return `${AUTO_LEASE_PREFIX}${String(conversationKey || 'unknown')}`;
+  }
+
+  function readStartAuditHandoff() {
+    try {
+      const raw = sessionStorage.getItem(AUTO_START_HANDOFF_SESSION_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || parsed.version !== 1) return null;
+      if (parsed.tabId !== autoTabId) return null;
+      if (!Number(parsed.expiresAt) || parsed.expiresAt <= Date.now()) {
+        const startStillOwnsTransaction =
+          parsed.tabId === autoTabId &&
+          ['preparing', 'armed'].includes(parsed.phase) &&
+          (auditStartInFlight || actionInFlight);
+
+        if (!startStillOwnsTransaction) {
+          sessionStorage.removeItem(AUTO_START_HANDOFF_SESSION_KEY);
+          return null;
+        }
+
+        parsed.expiresAt = Date.now() + AUTO_START_PREPARE_TTL_MS;
+        writeStartAuditHandoff(parsed);
+      }
+      return parsed;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function writeStartAuditHandoff(handoff) {
+    if (!handoff) return false;
+    try {
+      sessionStorage.setItem(AUTO_START_HANDOFF_SESSION_KEY, JSON.stringify(handoff));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function clearStartAuditHandoff() {
+    startRecoveryScheduleToken = '';
+    try { sessionStorage.removeItem(AUTO_START_HANDOFF_SESSION_KEY); } catch (_) { }
+  }
+
+  function beginStartAuditHandoff() {
+    const sourceKey = autoBoundConversationKey || currentConversationKey();
+    const snapshot = normalizeAutoRuntime(autoRuntime, sourceKey) || emptyAutoRuntime({ enabled: true });
+    snapshot.enabled = true;
+    snapshot.conversationKey = sourceKey;
+
+    const now = Date.now();
+    const handoff = {
+      version: 1,
+      tabId: autoTabId,
+      sourceKey,
+      lastKey: sourceKey,
+      phase: 'preparing',
+      startedAt: now,
+      sentAt: 0,
+      armedAt: 0,
+      destinationKey: '',
+      receipt: createAutoSendReceipt('startcore'),
+      expiresAt: now + AUTO_START_PREPARE_TTL_MS,
+      runtime: snapshot
+    };
+    if (!writeStartAuditHandoff(handoff)) return null;
+    writeA3Intent(true, sourceKey, { startTransaction: true });
+    return handoff;
+  }
+
+  function armStartAuditHandoffForSend(fallback = null) {
+    let handoff = readStartAuditHandoff();
+
+    if (!handoff && fallback) {
+      handoff = {
+        ...fallback,
+        version: 1,
+        tabId: autoTabId,
+        phase: 'preparing'
+      };
+    }
+
+    if (!handoff) return null;
+
+    const now = Date.now();
+    const key = autoBoundConversationKey || currentConversationKey();
+
+    handoff.phase = 'armed';
+    handoff.armedAt = now;
+    handoff.lastKey = key;
+    handoff.expiresAt = now + AUTO_START_PREPARE_TTL_MS;
+    handoff.runtime = normalizeAutoRuntime(autoRuntime, key) || handoff.runtime;
+
+    if (handoff.runtime) {
+      handoff.runtime.enabled = true;
+      handoff.runtime.conversationKey = key;
+    }
+
+    if (!writeStartAuditHandoff(handoff)) return null;
+    return handoff;
+  }
+
+  function markStartAuditHandoffClicking(fallback = null) {
+    let handoff = readStartAuditHandoff();
+
+    if (!handoff && fallback) {
+      handoff = {
+        ...fallback,
+        version: 1,
+        tabId: autoTabId
+      };
+    }
+
+    if (!handoff) return null;
+
+    const now = Date.now();
+    const key = autoBoundConversationKey || currentConversationKey();
+
+    handoff.phase = 'clicking';
+    handoff.clickAt = now;
+    handoff.lastKey = key;
+    handoff.expiresAt = now + AUTO_START_SENT_TTL_MS;
+    handoff.runtime = normalizeAutoRuntime(autoRuntime, key) || handoff.runtime;
+
+    if (handoff.runtime) {
+      handoff.runtime.enabled = true;
+      handoff.runtime.conversationKey = key;
+    }
+
+    if (!writeStartAuditHandoff(handoff)) return null;
+    return handoff;
+  }
+
+  function startHandoffIsPrepared(handoff) {
+    return Boolean(
+      handoff &&
+      ['armed', 'clicking'].includes(handoff.phase) &&
+      Number(handoff.expiresAt || 0) > Date.now()
+    );
+  }
+
+  function startHandoffIsCommitted(handoff) {
+    return Boolean(
+      handoff &&
+      handoff.phase === 'sent' &&
+      Number(handoff.expiresAt || 0) > Date.now()
+    );
+  }
+
+  function startHandoffRouteProven(handoff, turns = null) {
+    if (!handoff || Number(handoff.expiresAt || 0) <= Date.now()) return false;
+    if (startHandoffIsCommitted(handoff)) return true;
+    const receipt = String(handoff.receipt || '');
+    if (!receipt) return false;
+    const visibleTurns = turns || getChatGPTTurns();
+    return Boolean(exactReceiptUserTurn(receipt, visibleTurns));
+  }
+
+  function markStartAuditHandoffSent(fallback = null) {
+    let handoff = readStartAuditHandoff();
+
+    if (!handoff && fallback) {
+      handoff = {
+        ...fallback,
+        version: 1,
+        tabId: autoTabId
+      };
+    }
+
+    if (!handoff) return null;
+
+    const now = Date.now();
+    const key = autoBoundConversationKey || currentConversationKey();
+
+    handoff.phase = 'sent';
+    handoff.sentAt = now;
+    handoff.expiresAt = now + AUTO_START_SENT_TTL_MS;
+    handoff.lastKey = key;
+    handoff.runtime = normalizeAutoRuntime(autoRuntime, key) || handoff.runtime;
+
+    if (handoff.runtime) {
+      handoff.runtime.enabled = true;
+      handoff.runtime.conversationKey = key;
+    }
+
+    if (!writeStartAuditHandoff(handoff)) return null;
+    return handoff;
+  }
+
+  function runtimeIsBlankDisabled(runtime) {
+    if (!runtime) return true;
+    return (
+      !runtime.enabled &&
+      runtime.stage === 'idle' &&
+      !runtime.seenUserId &&
+      !runtime.anchorUserId &&
+      !runtime.coreUserId &&
+      !runtime.secondUserId &&
+      !runtime.performanceUserId &&
+      !runtime.baselineAssistantKey
+    );
+  }
+
+  function runtimeIsStartClaimable(runtime) {
+    if (!runtime) return true;
+    if (runtime.enabled) return false;
+
+    return Boolean(
+      runtime.stage === 'idle' &&
+      !runtime.anchorUserId &&
+      !runtime.coreUserId &&
+      !runtime.secondUserId &&
+      !runtime.performanceUserId &&
+      !runtime.expectedKind &&
+      !runtime.pendingSendReceipt &&
+      !runtime.pendingSendKind &&
+      !runtime.continuationKind &&
+      !runtime.runId
+    );
+  }
+
+  function startHandoffCanFollowRoute(handoff, previousKey, nextKey) {
+    if (!handoff || !nextKey) return false;
+    if (handoff.expiresAt <= Date.now()) return false;
+
+    const routeProven = startHandoffRouteProven(handoff);
+    const commitAt = Math.max(
+      Number(handoff.sentAt || 0),
+      Number(handoff.clickAt || 0),
+      Number(handoff.armedAt || 0),
+      Number(handoff.startedAt || 0)
+    );
+    const insideRouteCommitWindow = commitAt > 0 &&
+      Date.now() - commitAt <= AUTO_START_ROUTE_COMMIT_WINDOW_MS;
+    const insideHardBootstrapWindow = commitAt > 0 &&
+      Date.now() - commitAt <= AUTO_START_HARD_NAV_BOOTSTRAP_MS;
+
+    const exactStartTurnVisible = () => {
+      if (!handoff.receipt) return false;
+      return [...getChatGPTTurns()].reverse().some(turn =>
+        classifyAuditTurn(turn) === 'core' &&
+        userTurnContainsReceipt(turn, handoff.receipt)
+      );
+    };
+
+    if (!previousKey) {
+      if (handoff.destinationKey && handoff.destinationKey === nextKey) return true;
+      if (handoff.sourceKey && handoff.sourceKey === nextKey) return true;
+      if (routeProven && exactStartTurnVisible()) return true;
+      if (
+        routeProven &&
+        insideHardBootstrapWindow &&
+        !handoff.destinationKey &&
+        String(handoff.sourceKey || '').startsWith('draft:') &&
+        nextKey.startsWith('c:')
+      ) return true;
+      return false;
+    }
+
+    if (previousKey === nextKey) return false;
+
+    const followsKnownSource =
+      handoff.lastKey === previousKey ||
+      handoff.sourceKey === previousKey ||
+      handoff.destinationKey === previousKey;
+
+    if ((auditStartInFlight || actionInFlight) && followsKnownSource) {
+      if (exactStartTurnVisible()) return true;
+      if (
+        routeProven &&
+        insideRouteCommitWindow &&
+        !handoff.destinationKey &&
+        String(handoff.sourceKey || '').startsWith('draft:') &&
+        nextKey.startsWith('c:')
+      ) return true;
+      return false;
+    }
+
+    if (routeProven && followsKnownSource) {
+      if (exactStartTurnVisible()) return true;
+      if (insideRouteCommitWindow && !handoff.destinationKey && nextKey.startsWith('c:')) return true;
+    }
+
+    return false;
+  }
+
+  function migrateStartHandoffRuntime(handoff, destinationKey, destinationRuntime = null) {
+    if (!handoff || !destinationKey) return destinationRuntime;
+
+    // A brand-new destination can be touched by ChatGPT/ACB baseline bookkeeping
+    // before START migration runs (seenUserId/baselineAssistantKey). That is not
+    // an independent audit lineage. Only refuse takeover when the destination
+    // already owns actual audit state.
+    if (destinationRuntime && !runtimeIsBlankDisabled(destinationRuntime) && !runtimeIsStartClaimable(destinationRuntime)) {
+      return destinationRuntime;
+    }
+
+    const sourceRuntime =
+      normalizeAutoRuntime(handoff.runtime, destinationKey) ||
+      emptyAutoRuntime({ enabled: true });
+
+    sourceRuntime.enabled = true;
+    sourceRuntime.conversationKey = destinationKey;
+    sourceRuntime.updatedAt = Date.now();
+
+    if (!persistRuntimeForKey(destinationKey, sourceRuntime)) return destinationRuntime;
+
+    handoff.lastKey = destinationKey;
+    if (!handoff.destinationKey && destinationKey.startsWith('c:')) {
+      handoff.destinationKey = destinationKey;
+    }
+    handoff.runtime = normalizeAutoRuntime(sourceRuntime, destinationKey);
+    handoff.expiresAt = Date.now() + (
+      startHandoffIsCommitted(handoff)
+        ? AUTO_START_SENT_TTL_MS
+        : AUTO_START_PREPARE_TTL_MS
+    );
+    writeStartAuditHandoff(handoff);
+    writeA3Intent(true, destinationKey, { startTransaction: true });
+
+    return sourceRuntime;
+  }
+
+  function recoverSentStartCore(options = {}) {
+    const handoff = readStartAuditHandoff();
+    if (!startHandoffIsCommitted(handoff)) return false;
+
+    bindAutoRuntimeToCurrentConversation({ claim: false });
+
+    const currentKey = autoBoundConversationKey || currentConversationKey();
+    const wasEnabled = Boolean(autoRuntime?.enabled);
+    if (autoRuntime && !wasEnabled) autoRuntime.enabled = true;
+    if (!claimAutoLease()) {
+      if (!wasEnabled) refreshAutoRuntimeFromStorage();
+      return false;
+    }
+    const turns = getChatGPTTurns();
+    const exactStartTurn = handoff.receipt
+      ? [...turns].reverse().find(turn => userTurnContainsReceipt(turn, handoff.receipt))
+      : null;
+
+    const ownsCurrentRoute = Boolean(
+      currentKey === handoff.destinationKey ||
+      currentKey === handoff.lastKey ||
+      currentKey === handoff.sourceKey ||
+      exactStartTurn
+    );
+
+    // Exact START receipt is stronger than an early/default destination runtime.
+    // If route migration missed its window, bind the destination now instead of
+    // leaving A3 OFF forever.
+    if (exactStartTurn && currentKey.startsWith('c:') && handoff.destinationKey !== currentKey) {
+      handoff.destinationKey = currentKey;
+      handoff.lastKey = currentKey;
+
+      // Preserve identity captured before START. A late route recovery often binds
+      // a freshly-created destination runtime whose projectName is still blank.
+      // Replacing the handoff snapshot wholesale here made the chat fall back to
+      // ChatGPT's generated title (for example "Continue Core Audit").
+      const carriedProjectName = sanitizeProjectIdentity(handoff.runtime?.projectName || '');
+      const carriedProjectSource = carriedProjectName
+        ? String(handoff.runtime?.projectNameSource || 'artifact')
+        : '';
+      handoff.runtime = normalizeAutoRuntime(autoRuntime, currentKey) || handoff.runtime;
+      if (handoff.runtime) {
+        handoff.runtime.enabled = true;
+        handoff.runtime.conversationKey = currentKey;
+        if (carriedProjectName && !sanitizeProjectIdentity(handoff.runtime.projectName || '')) {
+          handoff.runtime.projectName = carriedProjectName;
+          handoff.runtime.projectNameSource = carriedProjectSource;
+        }
+      }
+      handoff.expiresAt = Date.now() + AUTO_START_SENT_TTL_MS;
+      writeStartAuditHandoff(handoff);
+      writeA3Intent(true, currentKey, { startTransaction: true });
+    }
+
+    if (ownsCurrentRoute && !autoRuntime.enabled) {
+      autoRuntime.enabled = true;
+      autoRuntime.conversationKey = currentKey;
+      saveAutoRuntime({ pauseOnFailure: false });
+      renderAutoAuditState();
+    }
+
+    const latestUser = exactStartTurn || latestChatGPTUserTurn(turns);
+
+    if (!latestUser || classifyAuditTurn(latestUser) !== 'core') {
+      if (options.finalAttempt && ownsCurrentRoute) {
+        setStatus(
+          'START AUDITING is still waiting for ChatGPT to hydrate the sent Core turn. A3 remains enabled; no manual toggle is required.',
+          'info'
+        );
+      }
+      return ownsCurrentRoute;
+    }
+
+    if (handoff.receipt && !userTurnContainsReceipt(latestUser, handoff.receipt)) {
+      // Another Core turn may exist in this chat. Do not let START recovery
+      // silently adopt the wrong audit when its exact machine receipt is absent.
+      if (options.finalAttempt && ownsCurrentRoute) {
+        setStatus(
+          'START AUDITING destination is loaded, but its exact Core receipt is not visible yet. A3 stays enabled and recovery keeps the lineage isolated.',
+          'info'
+        );
+      }
+      return ownsCurrentRoute;
+    }
+
+    if (!autoRuntime.enabled) {
+      autoRuntime.enabled = true;
+      autoRuntime.conversationKey = currentKey;
+      if (!saveAutoRuntime({ pauseOnFailure: false })) return false;
+    }
+
+    if (autoRuntime.stage === 'idle') {
+      const armed = armFromCoreTurn(latestUser, { allowCompleted: false });
+      if (!armed) return false;
+    }
+
+    if (autoRuntime.stage === 'wait-core' || autoRuntime.stage === 'paused' || autoRuntime.stage === 'complete') {
+      // wait-core is the expected successful adoption. paused/complete are not
+      // cleared here; they are meaningful states and must retain their own logic.
+      if (autoRuntime.stage === 'wait-core') {
+        claimAutoLease();
+        if (!options.skipMonitor) {
+          startAutoAuditMonitor({ immediate: true });
+        }
+        clearStartAuditHandoff();
+        writeA3Intent(true, currentKey, { startTransaction: false });
+
+        if (autoRuntime.projectName) {
+          scheduleConversationTitleGuard(autoRuntime.projectName, {
+            source: autoRuntime.projectNameSource || 'artifact',
+            conversationKey: autoBoundConversationKey || currentConversationKey(),
+            runStartedAt: autoRuntime.startedAt || 0
+          });
+        }
+
+        setStatus('START AUDITING handoff recovered. Auto3 remains enabled and owns the Core -> Second -> Performance chain.', 'success');
+        return true;
+      }
+    }
+
+    if (options.finalAttempt) {
+      setStatus('START AUDITING is still waiting for the Core turn to become adoptable. A3 state is preserved automatically; the normal observer/recovery path will continue without a manual toggle.', 'info');
+    }
+    return false;
+  }
+
+  function scheduleSentStartRecovery() {
+    const seed = readStartAuditHandoff();
+    if (!startHandoffIsCommitted(seed)) return false;
+
+    const token = [
+      seed.tabId,
+      seed.sourceKey,
+      seed.startedAt,
+      seed.clickAt || seed.sentAt || 0
+    ].join(':');
+
+    if (startRecoveryScheduleToken === token) return true;
+    startRecoveryScheduleToken = token;
+
+    for (let index = 0; index < AUTO_START_RECOVERY_DELAYS_MS.length; index += 1) {
+      const delay = AUTO_START_RECOVERY_DELAYS_MS[index];
+
+      setTimeout(() => {
+        if (startRecoveryScheduleToken !== token) return;
+
+        const handoff = readStartAuditHandoff();
+        if (!startHandoffIsCommitted(handoff)) {
+          if (startRecoveryScheduleToken === token) startRecoveryScheduleToken = '';
+          return;
+        }
+
+        recoverSentStartCore({
+          source: 'scheduled-start-recovery',
+          finalAttempt: index === AUTO_START_RECOVERY_DELAYS_MS.length - 1
+        });
+
+        if (
+          index === AUTO_START_RECOVERY_DELAYS_MS.length - 1 &&
+          startRecoveryScheduleToken === token
+        ) {
+          startRecoveryScheduleToken = '';
+        }
+      }, delay);
+    }
+
+    return true;
+  }
+
+  function chatGPTAuthInterstitialVisible() {
+    if (detectSite().key !== 'chatgpt') return false;
+
+    const candidates = document.querySelectorAll(
+      '[role="dialog"], [aria-modal="true"], [data-testid*="modal"], ' +
+      '[role="menu"], [data-state="open"], [data-radix-menu-content]'
+    );
+
+    for (const element of candidates) {
+      if (!isVisible(element)) continue;
+      const value = cleanTurnText(
+        String(element.innerText || element.textContent || '')
+      ).slice(0, 2200);
+
+      if (
+        /choose an account to continue/i.test(value) ||
+        /log in to another account/i.test(value) ||
+        /log in to get answers/i.test(value) ||
+        /create account/i.test(value) ||
+        /welcome back/i.test(value)
+      ) return true;
+    }
+
+    if (!currentConversationId() && location.pathname === '/') {
+      const labels = Array.from(document.querySelectorAll('button, a'))
+        .filter(isVisible)
+        .map(node => cleanTurnText(String(node.innerText || node.textContent || '')))
+        .filter(Boolean);
+
+      if (
+        labels.some(value => /^log in$/i.test(value)) &&
+        labels.some(value => /^sign up$/i.test(value))
+      ) return true;
+    }
+
+    return false;
+  }
+
+  function chatGPTLoggedOutRootVisible() {
+    if (detectSite().key !== 'chatgpt' || location.pathname !== '/') return false;
+
+    const visibleControls = Array.from(document.querySelectorAll('button, a'))
+      .filter(isVisible)
+      .map(node => cleanTurnText(String(node.innerText || node.textContent || '')).trim())
+      .filter(Boolean);
+
+    if (visibleControls.some(value => /^log in$/i.test(value))) return true;
+
+    const pageText = cleanTurnText(String(document.body?.innerText || '')).slice(0, 7000);
+    return /log in to get answers/i.test(pageText) ||
+      /choose an account to continue/i.test(pageText);
+  }
+
+  function chatGPTRootIsQuarantined() {
+    return location.pathname === '/' && (
+      chatGPTAuthInterstitialVisible() ||
+      chatGPTLoggedOutRootVisible()
+    );
+  }
+
+  function rememberStableConversationKey(key) {
+    if (!/^c:[^:]+/i.test(String(key || ''))) return false;
+    try {
+      sessionStorage.setItem(AUTO_LAST_STABLE_CHAT_SESSION_KEY, String(key));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function lastStableConversationKey() {
+    try {
+      const value = String(sessionStorage.getItem(AUTO_LAST_STABLE_CHAT_SESSION_KEY) || '');
+      return /^c:[^:]+/i.test(value) ? value : '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+
+  function readA3Intent() {
+    try {
+      const raw = sessionStorage.getItem(AUTO_A3_INTENT_SESSION_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || parsed.version !== 1 || parsed.tabId !== autoTabId) return null;
+      return parsed;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function writeA3Intent(enabled, conversationKey = autoBoundConversationKey || currentConversationKey(), options = {}) {
+    try {
+      const payload = {
+        version: 1,
+        tabId: autoTabId,
+        enabled: Boolean(enabled),
+        conversationKey: String(conversationKey || ''),
+        startTransaction: Boolean(options.startTransaction),
+        updatedAt: Date.now()
+      };
+      sessionStorage.setItem(AUTO_A3_INTENT_SESSION_KEY, JSON.stringify(payload));
+      return payload;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function clearA3Intent() {
+    try { sessionStorage.removeItem(AUTO_A3_INTENT_SESSION_KEY); } catch (_) { }
+  }
+
+  function a3IntentAllowsConversation(key, handoff = readStartAuditHandoff()) {
+    const intent = readA3Intent();
+    if (!intent?.enabled || !key) return false;
+    if (intent.conversationKey === key) return true;
+
+    if (!intent.startTransaction || !startHandoffIsCommitted(handoff)) return false;
+
+    // The intent itself must belong to this exact START lineage. The old OR
+    // condition treated `handoff.sourceKey === intent.conversationKey` as proof
+    // for ANY destination key, so one committed START could turn A3 on in an
+    // unrelated chat after a manual/sidebar route change.
+    const intentOwnsHandoff = [
+      String(handoff.sourceKey || ''),
+      String(handoff.lastKey || ''),
+      String(handoff.destinationKey || '')
+    ].filter(Boolean).includes(String(intent.conversationKey || ''));
+
+    if (!intentOwnsHandoff) return false;
+    return committedStartOwnsConversationKey(handoff, key);
+  }
+
+  function adoptA3IntentForConversation(key, options = {}) {
+    if (!key || !autoRuntime) return false;
+    const handoff = readStartAuditHandoff();
+    if (!a3IntentAllowsConversation(key, handoff)) return false;
+
+    let changed = false;
+    if (!autoRuntime.enabled) {
+      autoRuntime.enabled = true;
+      changed = true;
+    }
+    if (autoRuntime.conversationKey !== key) {
+      autoRuntime.conversationKey = key;
+      changed = true;
+    }
+
+    if (changed) saveAutoRuntime({ pauseOnFailure: false });
+
+    // START owns A3 intent until the exact Core turn is adopted and the
+    // handoff is cleared. Do not drop startTransaction merely because ChatGPT
+    // exposed an intermediate destinationKey: route hydration can still perform
+    // additional same-tab transitions before the authored Core turn appears.
+    writeA3Intent(true, key, {
+      startTransaction: Boolean(
+        options.startTransaction ||
+        (handoff && startHandoffIsCommitted(handoff))
+      )
+    });
+    return changed;
   }
 
   function createDraftLifetimeId() {
@@ -2429,9 +6928,19 @@
 
   function currentConversationKey() {
     const match = location.pathname.match(/^\/c\/([^/?#]+)/i);
-    if (match) return `c:${match[1]}`;
+    if (match) {
+      const key = `c:${match[1]}`;
+      rememberStableConversationKey(key);
+      return key;
+    }
+
+    if (chatGPTRootIsQuarantined()) return `auth:${autoTabId}`;
+
+    // Fresh root load is a draft. Never resurrect an old conversation from
+    // session intent. Same-document transient route loss is handled by bind().
     return `draft:${autoTabId}:${autoDraftId}`;
   }
+
 
   function removeStoredRuntime(conversationKey) {
     if (!conversationKey) return true;
@@ -2449,24 +6958,54 @@
   }
 
   function readStoredRuntime(conversationKey) {
+    const key = autoRuntimeStorageKey(conversationKey);
+    let raw = null;
     try {
-      const raw = GM_getValue(autoRuntimeStorageKey(conversationKey), null);
-      if (!raw) return { runtime: null, found: false };
-      const parsed = normalizeAutoRuntime(JSON.parse(raw), conversationKey);
-      return { runtime: parsed, found: Boolean(parsed) };
-    } catch (_) {
-      return { runtime: null, found: false };
+      raw = GM_getValue(key, null);
+    } catch (error) {
+      return { runtime: null, found: true, corrupt: true, reason: 'storage-read-failed', raw: null };
     }
+    if (raw === null || raw === undefined || raw === '') {
+      return { runtime: null, found: false, corrupt: false, reason: 'absent', raw: null };
+    }
+    try {
+      const parsed = normalizeAutoRuntime(JSON.parse(raw), conversationKey);
+      if (!parsed) return { runtime: null, found: true, corrupt: true, reason: 'runtime-invalid', raw: String(raw) };
+      return { runtime: parsed, found: true, corrupt: false, reason: 'valid', raw: String(raw) };
+    } catch (_) {
+      return { runtime: null, found: true, corrupt: true, reason: 'runtime-json-invalid', raw: String(raw) };
+    }
+  }
+
+  function corruptAutoRuntime(conversationKey, reason = 'runtime-invalid') {
+    const runtime = emptyAutoRuntime({ enabled: false });
+    runtime.conversationKey = conversationKey;
+    runtime.stage = 'paused';
+    runtime.pausedReason = `CORRUPT AUTO3 RUNTIME (${reason}). Automatic send/migration is disabled until explicit Reset repairs this conversation state.`;
+    runtime.storageCorrupt = true;
+    return runtime;
   }
 
   function persistRuntimeForKey(conversationKey, runtime) {
     if (!conversationKey || !runtime) return false;
-    const copy = normalizeAutoRuntime(runtime, conversationKey) || emptyAutoRuntime();
-    copy.version = 4;
+
+    // Never convert an invalid runtime into a silently blank/disabled one. The
+    // runtime checkpoint gates irreversible Auto3 sends, so invalid input or a
+    // failed storage read-back must fail closed and preserve the last durable
+    // value rather than manufacturing a fresh state.
+    const copy = normalizeAutoRuntime(runtime, conversationKey);
+    if (!copy) return false;
+
+    copy.version = 5;
     copy.conversationKey = conversationKey;
     copy.updatedAt = Date.now();
+    const key = autoRuntimeStorageKey(conversationKey);
     try {
-      GM_setValue(autoRuntimeStorageKey(conversationKey), JSON.stringify(copy));
+      const payload = JSON.stringify(copy);
+      GM_setValue(key, payload);
+      if (GM_getValue(key, null) !== payload) {
+        throw new Error('auto-runtime read-back mismatch');
+      }
       return true;
     } catch (_) {
       return false;
@@ -2539,11 +7078,17 @@
 
   function loadAutoRuntime(conversationKey = currentConversationKey()) {
     const stored = readStoredRuntime(conversationKey);
-    if (stored.runtime) return stored.runtime;
+    if (stored.runtime) {
+      if (autoRuntimeCorruptKey === conversationKey) autoRuntimeCorruptKey = '';
+      return stored.runtime;
+    }
+    if (stored.corrupt) {
+      autoRuntimeCorruptKey = conversationKey;
+      return corruptAutoRuntime(conversationKey, stored.reason);
+    }
 
     const migrated = loadLegacyAutoRuntimeForCurrentConversation(conversationKey);
     if (migrated) return migrated;
-
     const fresh = emptyAutoRuntime();
     fresh.conversationKey = conversationKey;
     return fresh;
@@ -2552,10 +7097,17 @@
   function saveAutoRuntime(options = {}) {
     if (!autoRuntime) return false;
     const key = autoBoundConversationKey || currentConversationKey();
-    autoRuntime.version = 4;
+    if (autoRuntimeCorruptKey === key && options.allowCorruptReplace !== true) {
+      clearAutoTimers();
+      releaseAutoLease(key);
+      setStatus('Auto3 found corrupt durable runtime state and refused to overwrite the evidence. Use explicit Reset to repair this conversation.', 'error');
+      renderAutoAuditState();
+      return false;
+    }
+
+    autoRuntime.version = 5;
     autoRuntime.conversationKey = key;
     autoRuntime.updatedAt = Date.now();
-
     const persisted = persistRuntimeForKey(key, autoRuntime);
     if (!persisted) {
       clearAutoTimers();
@@ -2570,7 +7122,7 @@
       setStatus('Auto3 persistence failed. Automation stopped before the next irreversible send; reload/Resume after userscript storage is writable again.', 'error');
       return false;
     }
-
+    if (autoRuntimeCorruptKey === key) autoRuntimeCorruptKey = '';
     renderAutoAuditState();
     return true;
   }
@@ -2785,66 +7337,204 @@
   function refreshAutoRuntimeFromStorage() {
     if (!autoBoundConversationKey) return autoRuntime;
     const stored = readStoredRuntime(autoBoundConversationKey);
-    if (stored.runtime) autoRuntime = stored.runtime;
+    if (stored.runtime) {
+      autoRuntimeCorruptKey = '';
+      autoRuntime = stored.runtime;
+    } else if (stored.corrupt) {
+      autoRuntimeCorruptKey = autoBoundConversationKey;
+      autoRuntime = corruptAutoRuntime(autoBoundConversationKey, stored.reason);
+    }
     return autoRuntime;
+  }
+
+
+  function committedStartOwnsConversationKey(handoff, key, options = {}) {
+    if (!startHandoffIsCommitted(handoff) || !key) return false;
+    if (Number(handoff.expiresAt || 0) <= Date.now()) return false;
+
+    if ([handoff.sourceKey, handoff.lastKey, handoff.destinationKey].includes(key)) return true;
+
+    const receipt = String(handoff.receipt || '');
+    if (receipt) {
+      const exact = exactReceiptUserTurn(receipt, getChatGPTTurns());
+      if (exact) return true;
+    }
+
+    // ChatGPT may allocate more than one transient /c/<id> while a newly sent
+    // draft is hydrating. During the bounded START bootstrap window, the explicit
+    // START transaction outranks a blank/disabled destination runtime. This is
+    // deliberately narrow: only draft-origin START, only stable chat routes, and
+    // only while the durable handoff is fresh.
+    const commitAt = Math.max(
+      Number(handoff.sentAt || 0),
+      Number(handoff.clickAt || 0),
+      Number(handoff.armedAt || 0),
+      Number(handoff.startedAt || 0)
+    );
+    const withinBootstrap = commitAt > 0 &&
+      Date.now() - commitAt <= AUTO_START_HARD_NAV_BOOTSTRAP_MS;
+
+    return Boolean(
+      withinBootstrap &&
+      !handoff.destinationKey &&
+      String(handoff.sourceKey || '').startsWith('draft:') &&
+      String(key).startsWith('c:') &&
+      options.allowBootstrap !== false
+    );
+  }
+
+  function forceCommittedStartEnabledForKey(key, runtime = autoRuntime) {
+    const handoff = readStartAuditHandoff();
+    if (!committedStartOwnsConversationKey(handoff, key)) return runtime;
+
+    const claimable = runtimeIsBlankDisabled(runtime) || runtimeIsStartClaimable(runtime);
+    const target = (claimable ? normalizeAutoRuntime(handoff.runtime, key) : normalizeAutoRuntime(runtime, key)) ||
+      emptyAutoRuntime({ enabled: true });
+    let changed = claimable;
+
+    if (!target.enabled) {
+      target.enabled = true;
+      changed = true;
+    }
+    if (target.conversationKey !== key) {
+      target.conversationKey = key;
+      changed = true;
+    }
+
+    // Preserve audit stage/anchors exactly. START authority only repairs the
+    // enablement/ownership bit that route hydration used to drop.
+    if (changed) persistRuntimeForKey(key, target);
+
+    writeA3Intent(true, key, { startTransaction: true });
+    return target;
+  }
+
+  function activeAuditNeedsRouteProtection(runtime = autoRuntime) {
+    const startHandoff = readStartAuditHandoff();
+    const key = autoBoundConversationKey || currentConversationKey();
+    if (
+      startHandoffIsCommitted(startHandoff) &&
+      committedStartOwnsConversationKey(startHandoff, key)
+    ) return true;
+    if (!runtime?.enabled) return false;
+
+    // START is an active transaction before armFromCoreTurn() can move the
+    // runtime out of idle. Protect it only while the current route still belongs
+    // to that START lineage; an unrelated chat must never inherit route immunity.
+    if (
+      startHandoff &&
+      (auditStartInFlight || actionInFlight) &&
+      (
+        [startHandoff.sourceKey, startHandoff.lastKey, startHandoff.destinationKey].includes(key) ||
+        (!startHandoff.destinationKey && String(startHandoff.sourceKey || '').startsWith('draft:') && String(key).startsWith('c:'))
+      )
+    ) return true;
+
+    return !['idle', 'complete'].includes(String(runtime.stage || 'idle')) ||
+      Boolean(runtime.runId || runtime.coreUserId || runtime.secondUserId || runtime.performanceUserId);
+  }
+
+  function shouldPreservePreviousStableKey(previousKey, previousRuntime, authInterstitial) {
+    if (!String(previousKey || '').startsWith('c:')) return false;
+    if (authInterstitial) return true;
+    if (!activeAuditNeedsRouteProtection(previousRuntime)) return false;
+
+    if (!autoRouteTransientSince) autoRouteTransientSince = Date.now();
+    return Date.now() - autoRouteTransientSince <= AUTO_ROUTE_TRANSIENT_GRACE_MS;
   }
 
   function bindAutoRuntimeToCurrentConversation(options = {}) {
     const stableMatch = location.pathname.match(/^\/c\/([^/?#]+)/i);
+    const authQuarantine = chatGPTRootIsQuarantined();
+    const authInterstitial = chatGPTAuthInterstitialVisible() || authQuarantine;
     const previousKey = autoBoundConversationKey;
     const previousRuntime = autoRuntime ? normalizeAutoRuntime(autoRuntime) : null;
 
-    // Leaving an established conversation for a new unsaved chat creates a new
-    // draft lifetime even though the browser tab and route "/" are reused.
-    if (!stableMatch && previousKey?.startsWith('c:')) {
+    if (stableMatch) {
+      autoRouteTransientSince = 0;
+      rememberStableConversationKey(`c:${stableMatch[1]}`);
+    }
+    const preservePreviousStable = !stableMatch && !authQuarantine &&
+      shouldPreservePreviousStableKey(previousKey, previousRuntime, authInterstitial);
+    if (!stableMatch && !authQuarantine && previousKey?.startsWith('c:') && !preservePreviousStable) {
+      autoRouteTransientSince = 0;
       createDraftLifetimeId();
     }
 
-    const key = currentConversationKey();
-    if (autoBoundConversationKey === key && autoRuntime) return true;
+    const key = authQuarantine ? `auth:${autoTabId}` : preservePreviousStable ? previousKey : currentConversationKey();
+    if (autoBoundConversationKey === key && autoRuntime) {
+      if (autoRuntimeCorruptKey === key || autoRuntime.storageCorrupt) return true;
+      autoRuntime = forceCommittedStartEnabledForKey(key, autoRuntime);
+      return true;
+    }
 
     if (previousKey) releaseAutoLease(previousKey);
+    if (previousKey && previousKey !== key) invalidateAuditResultCache(previousKey);
 
     const stored = readStoredRuntime(key);
     let nextRuntime = stored.runtime;
+    const storedCorrupt = Boolean(stored.corrupt);
+    autoRuntimeCorruptKey = storedCorrupt ? key : '';
 
-    if (
-      !nextRuntime &&
-      previousKey?.startsWith('draft:') &&
-      key.startsWith('c:') &&
-      previousRuntime &&
-      runtimeHasContinuity(previousRuntime)
-    ) {
+    const startHandoff = readStartAuditHandoff();
+    if (!storedCorrupt && startHandoff && startHandoffCanFollowRoute(startHandoff, previousKey, key) &&
+      (runtimeIsBlankDisabled(nextRuntime) || runtimeIsStartClaimable(nextRuntime))) {
+      nextRuntime = migrateStartHandoffRuntime(startHandoff, key, nextRuntime);
+    }
+
+    if (!storedCorrupt && !nextRuntime && previousKey?.startsWith('draft:') && key.startsWith('c:') && previousRuntime && runtimeHasContinuity(previousRuntime)) {
       nextRuntime = normalizeAutoRuntime(previousRuntime, key);
       if (persistRuntimeForKey(key, nextRuntime)) {
-        // Draft runtime is single-use. Leaving it behind lets a later new-chat
-        // route in the same tab resurrect an unrelated chain.
         removeStoredRuntime(previousKey);
       } else {
-        // Never carry an active automation chain into a stable conversation when
-        // its continuation state could not be durably written.
         nextRuntime = emptyAutoRuntime({ enabled: false });
         nextRuntime.conversationKey = key;
         setStatus('Draft-to-conversation Auto3 migration could not be persisted. Automation is disabled in this chat until storage works and you enable it explicitly.', 'error');
       }
     }
 
-    if (!nextRuntime) nextRuntime = loadAutoRuntime(key);
+    if (storedCorrupt) nextRuntime = corruptAutoRuntime(key, stored.reason);
+    else if (!nextRuntime) nextRuntime = loadAutoRuntime(key);
 
     autoBoundConversationKey = key;
-    autoRuntime = nextRuntime || emptyAutoRuntime();
-    autoRuntime.conversationKey = key;
-
-    renderAutoAuditState();
-
-    if (options.claim !== false && autoRuntime.enabled) {
-      claimAutoLease();
+    if (key.startsWith('auth:')) {
+      autoRuntimeCorruptKey = '';
+      autoRuntime = emptyAutoRuntime({ enabled: false });
+      autoRuntime.conversationKey = key;
+      disconnectProjectTitleObserver();
+    } else if (storedCorrupt) {
+      autoRuntime = nextRuntime;
+      disconnectProjectTitleObserver();
+      setStatus('Auto3 durable state is corrupt for this conversation. Recovery fails closed; automatic sends and migrations are disabled until explicit Reset.', 'error');
+    } else {
+      autoRuntime = nextRuntime || emptyAutoRuntime();
+      autoRuntime.conversationKey = key;
+      autoRuntime = forceCommittedStartEnabledForKey(key, autoRuntime);
+      adoptA3IntentForConversation(key);
     }
 
+    renderAutoAuditState();
+    if (!storedCorrupt && autoRuntime.projectName) {
+      const renameContext = { source: autoRuntime.projectNameSource || 'artifact', conversationKey: key, runStartedAt: autoRuntime.startedAt || 0 };
+      applyPersistentLocalProjectTitle(autoRuntime.projectName);
+      maybeRenameConversation(autoRuntime.projectName, renameContext).catch(() => { });
+    } else if (!storedCorrupt && !key.startsWith('auth:')) {
+      const expectedIdentityKey = key;
+      setTimeout(() => {
+        if (currentConversationKey() !== expectedIdentityKey || autoBoundConversationKey !== expectedIdentityKey) return;
+        try { reconcileProjectIdentityFromComposer({ rename: true }); } catch (_) { }
+      }, 180);
+    }
+
+    if (options.claim !== false && autoRuntime.enabled && !storedCorrupt) claimAutoLease();
     return true;
   }
 
   function clearAutoTimers() {
+    if (miniAttachmentRefreshTimer) {
+      clearTimeout(miniAttachmentRefreshTimer);
+      miniAttachmentRefreshTimer = 0;
+    }
     if (autoAuditCheckTimer) {
       clearTimeout(autoAuditCheckTimer);
       autoAuditCheckTimer = 0;
@@ -2852,6 +7542,10 @@
     if (autoAuditNextTimer) {
       clearTimeout(autoAuditNextTimer);
       autoAuditNextTimer = 0;
+    }
+    if (autoComposerHoldTimer) {
+      clearTimeout(autoComposerHoldTimer);
+      autoComposerHoldTimer = 0;
     }
   }
 
@@ -2873,54 +7567,60 @@
 
   function getChatGPTTurns() {
     const turns = [];
-    const seen = new Set();
+    const seenNodes = new Set();
+    const seenStable = new Set();
 
     const add = node => {
-      if (!node) return;
+      if (!node || seenNodes.has(node)) return;
       const role = turnRole(node);
       if (role !== 'user' && role !== 'assistant') return;
-
-      const message = node.matches?.('[data-message-id]')
+      const message = node.matches?.('[data-message-author-role]')
         ? node
-        : node.querySelector?.('[data-message-id]');
+        : node.querySelector?.(`[data-message-author-role="${role}"]`);
       const stableKey =
         node.getAttribute?.('data-turn-id') ||
-        message?.getAttribute('data-message-id') ||
+        message?.getAttribute?.('data-message-id') ||
         node.getAttribute?.('data-testid') ||
-        node;
-
-      if (seen.has(stableKey)) return;
-      seen.add(stableKey);
+        node.getAttribute?.('id') || '';
+      if (stableKey && seenStable.has(`${role}:${stableKey}`)) return;
+      seenNodes.add(node);
+      if (stableKey) seenStable.add(`${role}:${stableKey}`);
       turns.push(node);
     };
 
-    // One scoped discovery pass. The conversation root is the same canonical
-    // root the monitor observes, so discovery never scans the whole document.
-    // The union selector matches both turn wrappers (their own authoritative
-    // representation) and authored messages (hydration fallback), in document
-    // order; a wrapper precedes its own message subtree, so normalization to
-    // the wrapper keeps first occurrence, and the stable-key set deduplicates
-    // the overlapping representations without a second query or a final sort.
-    const root = document.querySelector('main') || document.body;
-    if (!root) return turns;
-
-    for (const node of root.querySelectorAll(
+    const normalizeMessage = node => node?.closest?.(
       'section[data-turn], article[data-turn], ' +
       'section[data-testid^="conversation-turn-"], article[data-testid^="conversation-turn-"], ' +
-      '[data-testid^="conversation-turn-"], ' +
-      '[data-message-author-role="user"], [data-message-author-role="assistant"]'
-    )) {
-      const role = node.getAttribute?.('data-message-author-role');
-      const wrapper = role === 'user' || role === 'assistant'
-        ? (node.closest?.(
-          'section[data-turn], article[data-turn], ' +
-          'section[data-testid^="conversation-turn-"], article[data-testid^="conversation-turn-"], ' +
-          '[data-testid^="conversation-turn-"]'
-        ) || node)
-        : node;
-      add(wrapper);
+      '[data-testid^="conversation-turn-"]'
+    ) || node || null;
+
+    const root = document.querySelector('main') || document.body;
+    const stableSelector =
+      'section[data-turn], article[data-turn], ' +
+      'section[data-testid^="conversation-turn-"], article[data-testid^="conversation-turn-"], ' +
+      '[data-testid^="conversation-turn-"]';
+
+    if (root) {
+      for (const node of root.querySelectorAll(stableSelector)) add(node);
     }
 
+    let usedFallback = false;
+    if (!turns.some(turn => turnRole(turn) === 'user')) {
+      usedFallback = true;
+      for (const message of document.querySelectorAll(
+        '[data-message-author-role="user"], [data-message-author-role="assistant"]'
+      )) add(normalizeMessage(message));
+    }
+
+    if (usedFallback && turns.length > 1) {
+      turns.sort((a, b) => {
+        if (a === b) return 0;
+        const relation = a.compareDocumentPosition(b);
+        if (relation & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+        if (relation & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+        return 0;
+      });
+    }
     return turns;
   }
 
@@ -2961,88 +7661,116 @@
   }
 
   // One bounded snapshot of an assistant turn per evaluation. The gate input,
-// the fallback whole-message candidates and the fingerprint all derive from
-// this single extraction pass, so a stabilization evaluation never re-reads
-// the same rendered answer a second time. The candidate bound (16) is applied
-// DURING collection: surfaces beyond it would be sliced off anyway, so their
-// text is never materialized.
-function buildAssistantSnapshot(turn) {
-  if (!turn || turnRole(turn) !== 'assistant') {
-    return { candidates: [], whole: [], fingerprint: '', sourceCount: 0 };
-  }
-
-  const message = turn.matches?.('[data-message-author-role="assistant"]')
-    ? turn
-    : (turn.querySelector?.('[data-message-author-role="assistant"]') || turn);
-  const candidates = [];
-  const seen = new Set();
-  const whole = [];
-
-  const add = value => {
-    const cleaned = cleanTurnText(value);
-    if (!cleaned || seen.has(cleaned)) return;
-    seen.add(cleaned);
-    candidates.push(cleaned);
-  };
-
-  const addWhole = value => {
-    const cleaned = cleanTurnText(value);
-    if (cleaned && !whole.includes(cleaned)) whole.push(cleaned);
-  };
-
-  // Authored answer surfaces first. ChatGPT can render a final answer as ordinary
-  // markdown, a code/pre block, a writing block, or a mixture of those.
-  for (const surface of message.querySelectorAll(
-    '.markdown.prose, .markdown[class*="prose"], .markdown, ' +
-    'pre, [data-writing-block="true"], [data-testid="writing-block-container"]'
-  )) {
-    add(readableNodeText(surface));
-    if (candidates.length >= 16) break;
-    add(surface.textContent);
-    if (candidates.length >= 16) break;
-  }
-
-  // Robust fallbacks. These intentionally happen after authored surfaces so UI
-  // chrome never masks a good answer, but can still rescue us after DOM changes.
-  if (candidates.length < 16) add(readableNodeText(message));
-  if (candidates.length < 16) add(message.textContent);
-  if (candidates.length < 16) add(readableNodeText(turn));
-  if (candidates.length < 16) add(turn.textContent);
-
-  // Whole-message candidates stay unbounded: they are the authoritative gate
-  // input (real header plus all tickets), not bounded surface evidence.
-  addWhole(readableNodeText(message));
-  addWhole(message.textContent);
-  addWhole(readableNodeText(turn));
-  addWhole(turn.textContent);
-
-  // Incremental FNV-1a over candidate boundaries: identical to hashing the
-  // joined string, without materializing a combined copy of the answer.
-  let hash = 2166136261;
-  let length = 0;
-  const feed = value => {
-    const text = String(value || '');
-    for (let index = 0; index < text.length; index += 1) {
-      hash ^= text.charCodeAt(index);
-      hash = Math.imul(hash, 16777619);
+  // the fallback whole-message candidates and the fingerprint all derive from
+  // this single extraction pass, so a stabilization evaluation never re-reads
+  // the same rendered answer a second time. The candidate bound (16) is applied
+  // DURING collection: surfaces beyond it would be sliced off anyway, so their
+  // text is never materialized.
+  function buildAssistantSnapshot(turn) {
+    if (!turn || turnRole(turn) !== 'assistant') {
+      return { candidates: [], whole: [], fingerprint: '', sourceCount: 0, bestText: '' };
     }
-    length += text.length;
-  };
-  for (let index = 0; index < candidates.length; index += 1) {
-    if (index) {
-      feed('\n\n---ACB-SURFACE---\n\n');
-      length += 20;
+
+    const message = turn.matches?.('[data-message-author-role="assistant"]')
+      ? turn
+      : (turn.querySelector?.('[data-message-author-role="assistant"]') || turn);
+    const candidates = [];
+    const seen = new Set();
+    const whole = [];
+    const add = value => {
+      const cleaned = cleanTurnText(value);
+      if (!cleaned || seen.has(cleaned)) return;
+      seen.add(cleaned);
+      candidates.push(cleaned);
+    };
+    const addWhole = value => {
+      const cleaned = cleanTurnText(value);
+      if (cleaned && !whole.includes(cleaned)) whole.push(cleaned);
+    };
+
+    for (const surface of message.querySelectorAll(
+      '.markdown.prose, .markdown[class*="prose"], .markdown, ' +
+      'pre, [data-writing-block="true"], [data-testid="writing-block-container"]'
+    )) {
+      const visual = readableNodeText(surface);
+      const raw = String(surface.textContent || '');
+      add(visual);
+      if (candidates.length < 16) add(raw);
+      if (candidates.length >= 16) break;
     }
-    feed(candidates[index]);
+
+    const messageVisual = readableNodeText(message);
+    const messageRaw = String(message.textContent || '');
+    const sameNode = turn === message;
+    const turnVisual = sameNode ? messageVisual : readableNodeText(turn);
+    const turnRaw = sameNode ? messageRaw : String(turn.textContent || '');
+
+    if (candidates.length < 16) add(messageVisual);
+    if (candidates.length < 16) add(messageRaw);
+    if (candidates.length < 16) add(turnVisual);
+    if (candidates.length < 16) add(turnRaw);
+
+    addWhole(messageVisual);
+    addWhole(messageRaw);
+    addWhole(turnVisual);
+    addWhole(turnRaw);
+
+    let hash = 2166136261;
+    let length = 0;
+    const feed = value => {
+      const text = String(value || '');
+      for (let index = 0; index < text.length; index += 1) {
+        hash ^= text.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+      }
+      length += text.length;
+    };
+    for (let index = 0; index < candidates.length; index += 1) {
+      if (index) feed('\n\n---ACB-SURFACE---\n\n');
+      feed(candidates[index]);
+    }
+    const fingerprint = `${length}:${(hash >>> 0).toString(36)}`;
+    const bestText = whole[0] || candidates[0] || '';
+    return { candidates, whole, fingerprint, sourceCount: candidates.length, bestText };
   }
-  const fingerprint = `${length}:${(hash >>> 0).toString(36)}`;
 
-  return { candidates, whole, fingerprint, sourceCount: candidates.length };
-}
+  function assistantTextCandidates(turn) {
+    return buildAssistantSnapshot(turn).candidates;
+  }
 
-function assistantTextCandidates(turn) {
-  return buildAssistantSnapshot(turn).candidates;
-}
+  function userTurnTextCandidates(turn) {
+    if (!turn || turnRole(turn) !== 'user') return [];
+
+    const message = turn.matches?.('[data-message-author-role="user"]')
+      ? turn
+      : (turn.querySelector?.('[data-message-author-role="user"]') || turn);
+
+    const candidates = [];
+    const seen = new Set();
+    const add = value => {
+      const cleaned = cleanTurnText(value);
+      if (!cleaned || seen.has(cleaned)) return;
+      seen.add(cleaned);
+      candidates.push(cleaned);
+    };
+
+    for (const node of message.querySelectorAll(
+      '[data-message-content-part-type="text"], ' +
+      '.user-message-bubble-color .markdown, .user-message-bubble-color, .markdown'
+    )) {
+      add(readableNodeText(node));
+      if (candidates.length >= 12) break;
+    }
+
+    add(readableNodeText(message));
+    add(message.textContent);
+    if (message !== turn) {
+      add(readableNodeText(turn));
+      add(turn.textContent);
+    }
+
+    return candidates.slice(0, 16);
+  }
 
   function getTurnText(turn) {
     if (!turn) return '';
@@ -3051,12 +7779,9 @@ function assistantTextCandidates(turn) {
       ? turn
       : turn.querySelector?.(`[data-message-author-role="${role}"]`);
 
-    if (role === 'user' && message) {
-      // Prefer only authored user text so attachment filenames cannot arm the chain.
-      const authoredText = message.querySelector(
-        '.user-message-bubble-color .markdown, .user-message-bubble-color, [data-message-content-part-type="text"]'
-      );
-      if (authoredText) return readableNodeText(authoredText);
+    if (role === 'user') {
+      const candidates = userTurnTextCandidates(turn);
+      if (candidates.length) return candidates[0];
     }
 
     if (role === 'assistant') {
@@ -3072,6 +7797,67 @@ function assistantTextCandidates(turn) {
       if (turnRole(turns[index]) === 'user') return turns[index];
     }
     return null;
+  }
+
+  function latestChatGPTAssistantTurn(turns = getChatGPTTurns()) {
+    for (let index = turns.length - 1; index >= 0; index -= 1) {
+      if (turnRole(turns[index]) === 'assistant') return turns[index];
+    }
+    return null;
+  }
+
+  function activeStageAnchorId(stage = autoRuntime?.stage || '') {
+    if (stage === 'wait-core') return String(autoRuntime?.coreUserId || '');
+    if (stage === 'wait-second') return String(autoRuntime?.secondUserId || '');
+    if (stage === 'wait-performance') return String(autoRuntime?.performanceUserId || '');
+    return '';
+  }
+
+  function rememberStageAssistant(turn) {
+    if (!autoRuntime || !turn || turnRole(turn) !== 'assistant') return;
+    const id = getTurnId(turn);
+    if (!id || autoRuntime.stageAssistantId === id) return;
+    autoRuntime.stageAssistantId = id;
+    autoRuntime.anchorMissingSince = 0;
+    saveAutoRuntime({ pauseOnFailure: false });
+  }
+
+  function clearStageAssistant(options = {}) {
+    if (!autoRuntime) return;
+    autoRuntime.stageAssistantId = '';
+    autoRuntime.anchorMissingSince = 0;
+    if (options.save !== false) saveAutoRuntime({ pauseOnFailure: false });
+  }
+
+  function visibleUserConflictsWithActiveStage(turns = getChatGPTTurns()) {
+    if (!autoRuntime) return false;
+    const expected = activeWaveKind(autoRuntime.stage);
+    const latestUser = latestChatGPTUserTurn(turns);
+    if (!latestUser || !expected) return false;
+
+    const visibleId = getTurnId(latestUser);
+    const savedId = activeStageAnchorId(autoRuntime.stage);
+    if (savedId && visibleId && savedId === visibleId) return false;
+
+    const latestKind = classifyAuditTurn(latestUser);
+    if (!latestKind) return false; // plain user prose/files are supplemental context
+    return latestKind !== expected;
+  }
+
+  function recoverVirtualizedStageAssistant(turns = getChatGPTTurns()) {
+    if (!autoRuntime || !['wait-core', 'wait-second', 'wait-performance'].includes(autoRuntime.stage)) {
+      return null;
+    }
+    if (visibleUserConflictsWithActiveStage(turns)) return null;
+
+    if (autoRuntime.stageAssistantId) {
+      const remembered = findTurnById(autoRuntime.stageAssistantId, turns);
+      if (remembered && turnRole(remembered) === 'assistant') return remembered;
+    }
+
+    const latest = latestChatGPTAssistantTurn(turns);
+    if (latest) rememberStageAssistant(latest);
+    return latest;
   }
 
   function assistantTurnAfter(userTurn, turns = getChatGPTTurns()) {
@@ -3097,6 +7883,130 @@ function assistantTextCandidates(turn) {
     return null;
   }
 
+  function auditUserFlowAfter(anchor, expectedKind, turns = getChatGPTTurns()) {
+    const result = {
+      expectedTurn: null,
+      conflictingTurn: null,
+      conflictingKind: '',
+      supplementals: [],
+      lastSupplemental: null
+    };
+    if (!anchor) return result;
+
+    const start = turns.indexOf(anchor);
+    if (start < 0) return result;
+
+    for (let index = start + 1; index < turns.length; index += 1) {
+      const turn = turns[index];
+      if (turnRole(turn) !== 'user') continue;
+
+      const kind = classifyAuditTurn(turn);
+      if (!kind) {
+        result.supplementals.push(turn);
+        result.lastSupplemental = turn;
+        continue;
+      }
+
+      if (kind === expectedKind) {
+        result.expectedTurn = turn;
+        continue;
+      }
+
+      result.conflictingTurn = turn;
+      result.conflictingKind = kind;
+      break;
+    }
+
+    return result;
+  }
+
+  function latestExpectedAuditUserTurn(expectedKind, turns = getChatGPTTurns()) {
+    if (!expectedKind) return null;
+    for (let index = turns.length - 1; index >= 0; index -= 1) {
+      const turn = turns[index];
+      if (turnRole(turn) !== 'user') continue;
+      const kind = classifyAuditTurn(turn);
+      if (!kind) continue; // supplemental context never breaks lineage
+      return kind === expectedKind ? turn : null; // newest real audit command wins
+    }
+    return null;
+  }
+
+  function latestAssistantAfterTurn(turn, turns = getChatGPTTurns()) {
+    if (!turn) return null;
+    const start = turns.indexOf(turn);
+    if (start < 0) return null;
+    let latest = null;
+    for (let index = start + 1; index < turns.length; index += 1) {
+      if (turnRole(turns[index]) === 'assistant') latest = turns[index];
+    }
+    return latest;
+  }
+
+  function assistantStronglyMatchesAuditWave(turn, kind) {
+    if (!turn || turnRole(turn) !== 'assistant' || !kind) return false;
+    const stage = waveWaitStage(kind);
+    if (!stage) return false;
+
+    const snapshot = buildAssistantSnapshot(turn);
+    const gate = responseGateFromAssistantTurn(stage, turn, snapshot);
+    if (gate.state !== 'unknown') return true;
+
+    const text = normalizeAuditResponseText(snapshot.bestText || snapshot.candidates.join('\n\n')).slice(0, 24000);
+    if (!text) return false;
+    const spec = auditGateSpec(stage);
+    const waveLine = text.match(/^\s*WAVE\s*:\s*(.+)$/im)?.[1] || '';
+    const hasWave = Boolean(waveLine && spec?.wave?.test(waveLine));
+    const hasProject = /^\s*PROJECT_NAME\s*:\s*\S/im.test(text);
+    const hasTickets = /^\s*TICKETS\s*:\s*\d+\s*$/im.test(text);
+    const hasHandoff = /^\s*HANDOFF\s*:\s*IMPLEMENTATION_AGENT\s*$/im.test(text);
+    return hasWave && (hasTickets || hasProject || hasHandoff);
+  }
+
+  function auditAssistantAcrossSupplementals(anchor, kind, turns = getChatGPTTurns()) {
+    if (!anchor || !kind) return null;
+
+    // Strongest ownership: the normal adjacent assistant response to the audit
+    // command remains authoritative even if the user adds a note afterwards.
+    const adjacent = assistantTurnAfter(anchor, turns);
+    if (adjacent) return adjacent;
+
+    const start = turns.indexOf(anchor);
+    if (start < 0) return null;
+
+    let candidate = null;
+    for (let index = start + 1; index < turns.length; index += 1) {
+      const turn = turns[index];
+      const role = turnRole(turn);
+
+      if (role === 'user') {
+        const userKind = classifyAuditTurn(turn);
+        if (userKind && userKind !== kind) break;
+        continue; // plain user turns are supplemental context
+      }
+
+      if (role === 'assistant' && assistantStronglyMatchesAuditWave(turn, kind)) {
+        candidate = turn;
+      }
+    }
+
+    return candidate;
+  }
+
+  function sidecarContextCountAfter(anchor, turns = getChatGPTTurns()) {
+    if (!anchor) return 0;
+    const start = turns.indexOf(anchor);
+    if (start < 0) return 0;
+    let count = 0;
+    for (let index = start + 1; index < turns.length; index += 1) {
+      const turn = turns[index];
+      if (turnRole(turn) !== 'user') continue;
+      if (classifyAuditTurn(turn)) continue;
+      count += 1;
+    }
+    return count;
+  }
+
   function findTurnById(id, turns = getChatGPTTurns()) {
     if (!id) return null;
     return turns.find(turn => getTurnId(turn) === id) || null;
@@ -3117,56 +8027,128 @@ function assistantTextCandidates(turn) {
     }
   ]);
 
-  // One canonical audit-command recognizer. A message is a command only when the
-  // marker is the first meaningful authored line, optionally followed by the
-  // canonical prompt body (em-dash) or the generated CONTINUE framing. Quoted
-  // handoffs, fenced code examples, headings, bullets and prose that merely
-  // mentions a marker never classify, so talking about "AUDIT CORE" cannot arm
-  // automation. Attachment filenames alone are never trusted.
+  // Canonical audit-command recognizer.
+  //
+  // v0.0.16 accidentally used /\s+/g before split('\n'), erasing every newline.
+  // That made AI ChatButtons reject its own file-delivery marker:
+  //
+  //   AUDIT CORE
+  //   The complete command is attached as "AUDIT_CORE_x.md".
+  //
+  // Preserve lines and explicitly ignore fenced/quoted/list examples instead.
   function classifyAuditMessage(text) {
-    const head = String(text || '')
+    const normalized = String(text || '')
       .replace(/\u00a0/g, ' ')
-      .replace(/\s+/g, ' ')
+      .replace(/[\u200b\u200c\u200d\ufeff]/g, '')
+      .replace(/\r\n?/g, '\n')
+      .replace(/[ \t\f\v]+/g, ' ')
       .trim()
-      .slice(0, 1800);
-    if (!head) return '';
+      .slice(0, 6000);
+    if (!normalized) return '';
 
-    const meaningful = [];
-    for (const line of head.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      if (/^[>#|`]/.test(trimmed) || /^[-*]\s/.test(trimmed)) continue;
-      meaningful.push(trimmed);
-      if (meaningful.length >= 2) break;
-    }
-    if (!meaningful.length) return '';
+    // ChatGPT commonly renders attachment tiles BEFORE the authored user text.
+    // The previous recognizer trusted only the first meaningful line, so a tile
+    // label (or one stray keystroke such as `d`) hid the later canonical
+    // `AUDIT CORE` marker and left an obviously running audit stuck at READY.
+    // Scan every safe authored line instead. Exact command markers remain the
+    // authority; quoted/list/fenced examples are deliberately ignored.
+    let inFence = false;
+    for (const rawLine of normalized.split('\n')) {
+      const line = rawLine.trim();
+      if (!line) continue;
 
-    for (const spec of AUDIT_COMMAND_MARKERS) {
-      if (spec.line.test(meaningful[0])) return spec.kind;
+      if (/^```/.test(line)) {
+        inFence = !inFence;
+        continue;
+      }
+      if (inFence) continue;
+      if (/^[>#|]/.test(line) || /^[-*]\s/.test(line)) continue;
+
+      for (const spec of AUDIT_COMMAND_MARKERS) {
+        if (spec.line.test(line)) return spec.kind;
+      }
     }
+
+    // Some ChatGPT accessibility/layout surfaces flatten attachment labels and
+    // message text into one line. In that representation the canonical command
+    // may no longer be first, so anchor to the exact ACB attachment framing
+    // rather than to the beginning of the flattened string.
+    const flat = normalized.replace(/\s+/g, ' ').trim();
+    const attachmentPatterns = [
+      ['performance', /(?:^|\s)AUDIT\s+PERFORMANCE(?:\s*\/\s*STABILITY(?:\s*\/\s*EFFECTIVENESS)?)?\s+The complete command is attached as\s+"AUDIT[_\s-]*PERFORMANCE/i],
+      ['second', /(?:^|\s)AUDIT\s+SECOND\s+WAVE\s+The complete command is attached as\s+"AUDIT[_\s-]*SECOND/i],
+      ['core', /(?:^|\s)AUDIT\s+CORE\s+The complete command is attached as\s+"AUDIT[_\s-]*CORE/i]
+    ];
+    for (const [kind, pattern] of attachmentPatterns) {
+      if (pattern.test(flat)) return kind;
+    }
+
+    return '';
+  }
+
+  function knownAuditReceiptKind(turn) {
+    if (!turn || turnRole(turn) !== 'user') return '';
+
+    // Exact receipts are stronger than surrounding composer text. START/Auto3
+    // owns these tokens, so one accidental leading keystroke (for example `d`)
+    // must not make a genuinely sent audit turn invisible to the state machine.
+    // Never accept an arbitrary receipt-looking string: it must match the live
+    // START handoff or the current committed/pending Auto3 transaction.
+    const known = [];
+
+    const start = readStartAuditHandoff();
+    if (start?.receipt) known.push({ receipt: String(start.receipt), kind: 'core' });
+
+    const committed = readCommittedAutoSend();
+    if (committed?.receipt && committed?.kind) {
+      known.push({ receipt: String(committed.receipt), kind: String(committed.kind) });
+    }
+
+    if (autoRuntime?.pendingSendReceipt && autoRuntime?.pendingSendKind) {
+      known.push({ receipt: String(autoRuntime.pendingSendReceipt), kind: String(autoRuntime.pendingSendKind) });
+    }
+
+    for (const item of known) {
+      if (!['core', 'second', 'performance'].includes(item.kind)) continue;
+      if (userTurnContainsReceipt(turn, item.receipt)) return item.kind;
+    }
+
     return '';
   }
 
   function classifyAuditTurn(turn) {
     if (!turn || turnRole(turn) !== 'user') return '';
 
-    const fromText = classifyAuditMessage(getTurnText(turn));
-    if (fromText) return fromText;
+    for (const candidate of userTurnTextCandidates(turn)) {
+      const kind = classifyAuditMessage(candidate);
+      if (kind) return kind;
+    }
 
-    // ChatGPT converts very large pasted text into an internal attachment with
-    // a "Show in text field" control. Its label starts with the pasted text, so
-    // the canonical command framing is verified on that label itself. A bare
-    // attachment filename is never enough to classify a turn.
-    for (const tile of turn.querySelectorAll('[role="group"][aria-label]')) {
+    const receiptKind = knownAuditReceiptKind(turn);
+    if (receiptKind) return receiptKind;
+
+    // Very large pasted commands can become an internal attachment. The
+    // accessibility label is accepted only if it contains canonical framing.
+    for (const tile of turn.querySelectorAll?.('[role="group"][aria-label]') || []) {
+      const bigPaste = tile.querySelector?.(
+        'button[name="expand-file-tile"][aria-label="Show in text field"], ' +
+        'button[name="expand-file-tile"]'
+      );
+      if (!bigPaste) continue;
+
       const label = String(tile.getAttribute('aria-label') || '').trim();
-      const bigPaste = tile.querySelector('button[name="expand-file-tile"][aria-label="Show in text field"], button[name="expand-file-tile"]');
-      if (bigPaste) {
-        const fromBigPaste = classifyAuditMessage(label);
-        if (fromBigPaste) return fromBigPaste;
-      }
+      const kind = classifyAuditMessage(label);
+      if (kind) return kind;
     }
 
     return '';
+  }
+
+
+  function auditTurnIsContinuation(turn) {
+    if (!turn || turnRole(turn) !== 'user') return false;
+    const marker = /\bAUDIT\s+(?:CORE|SECOND\s+WAVE|PERFORMANCE(?:\s*\/\s*STABILITY(?:\s*\/\s*EFFECTIVENESS)?)?)\s+CONTINUE\b/i;
+    return userTurnTextCandidates(turn).some(candidate => marker.test(String(candidate || '')));
   }
 
   function textFingerprint(text) {
@@ -3344,7 +8326,9 @@ function assistantTextCandidates(turn) {
 
     const maxAttempts = reason === 'stall'
       ? AUTO_MAX_STALL_NUDGES
-      : AUTO_MAX_PARTIAL_CONTINUATIONS;
+      : reason === 'sidecar'
+        ? AUTO_MAX_SIDECAR_RECOVERIES
+        : AUTO_MAX_PARTIAL_CONTINUATIONS;
 
     const triggerLines = reason === 'stall'
       ? [
@@ -3352,14 +8336,26 @@ function assistantTextCandidates(turn) {
         'Treat this as an interrupted response, not as completion and not as a request for human supervision.',
         'Continue from the exact point already reached in this SAME wave.'
       ]
-      : [
-        'The immediately preceding result reported PARTIAL.',
-        'Treat PARTIAL as a machine-resumable checkpoint, not as a request for human supervision.',
-        'Continue from the exact point already reached in this SAME wave.'
-      ];
+      : reason === 'sidecar'
+        ? [
+          'One or more non-audit user messages were added while this audit wave was active.',
+          'Treat those messages as supplemental context for the SAME project/target and SAME audit wave, not as a replacement task and not as a reason to request human supervision.',
+          'Incorporate any relevant new facts, constraints or corrections, then continue from the exact point already reached in this SAME wave.'
+        ]
+        : [
+          'The immediately preceding result reported PARTIAL.',
+          'Treat PARTIAL as a machine-resumable checkpoint, not as a request for human supervision.',
+          'Continue from the exact point already reached in this SAME wave.'
+        ];
+
+    const recoveryLabel = reason === 'stall'
+      ? 'liveness recovery'
+      : reason === 'sidecar'
+        ? 'supplemental-context recovery'
+        : 'continuation';
 
     return [
-      `${marker} — unattended ${reason === 'stall' ? 'liveness recovery' : 'continuation'} ${attempt}/${maxAttempts}.`,
+      `${marker} — unattended ${recoveryLabel} ${attempt}/${maxAttempts}.`,
       '',
       ...triggerLines,
       '',
@@ -3395,13 +8391,34 @@ function assistantTextCandidates(turn) {
   function queueSameWaveContinuation(kind, reason = 'partial') {
     if (!autoRuntime || !kind) return false;
 
-    const counterField = reason === 'stall' ? 'stallNudges' : 'partialContinuations';
-    const limit = reason === 'stall' ? AUTO_MAX_STALL_NUDGES : AUTO_MAX_PARTIAL_CONTINUATIONS;
+    // A COMPLETE/BLOCKED response may finish during the idle grace window.
+    // Re-check the live authored result before converting a liveness suspicion
+    // into durable continuation state. This is especially important when a
+    // hidden/frozen tab wakes after the assistant already finished.
+    if (preemptSameWaveContinuationFromLiveResult(kind, {
+      previousUserId: waveUserId(kind)
+    })) return true;
+
+    const counterField = reason === 'stall'
+      ? 'stallNudges'
+      : reason === 'sidecar'
+        ? 'sidecarRecoveries'
+        : 'partialContinuations';
+    const limit = reason === 'stall'
+      ? AUTO_MAX_STALL_NUDGES
+      : reason === 'sidecar'
+        ? AUTO_MAX_SIDECAR_RECOVERIES
+        : AUTO_MAX_PARTIAL_CONTINUATIONS;
     const count = bumpWaveCounter(counterField, kind);
 
     if (count > limit) {
+      const capLabel = reason === 'stall'
+        ? 'idle-recovery'
+        : reason === 'sidecar'
+          ? 'supplemental-context recovery'
+          : 'PARTIAL-continuation';
       pauseAutoAudit(
-        `${waveLabel(kind)} exceeded the unattended ${reason === 'stall' ? 'idle-recovery' : 'PARTIAL-continuation'} safety cap (${limit}). Chain stopped to prevent an infinite loop.`
+        `${waveLabel(kind)} exceeded the unattended ${capLabel} safety cap (${limit}). Chain stopped to prevent an infinite loop.`
       );
       return false;
     }
@@ -3415,6 +8432,8 @@ function assistantTextCandidates(turn) {
     autoRuntime.waitStartedAt = Date.now();
     autoRuntime.stableResponseKey = '';
     autoRuntime.stableSince = 0;
+    autoRuntime.stageAssistantId = '';
+    autoRuntime.anchorMissingSince = 0;
     autoRuntime.idleStallKey = '';
     autoRuntime.idleStallSince = 0;
     if (!saveAutoRuntime()) return false;
@@ -3422,12 +8441,65 @@ function assistantTextCandidates(turn) {
     setStatus(
       reason === 'stall'
         ? `${waveLabel(kind)} appears idle/stopped without a terminal audit status. Sending a same-wave recovery nudge automatically (${count}/${limit}).`
-        : `${waveLabel(kind)} reported PARTIAL. Continuing the same wave automatically (${count}/${limit}); no user action is required.`,
+        : reason === 'sidecar'
+          ? `${waveLabel(kind)} received supplemental user context during the active wave. Continuing the SAME wave automatically (${count}/${limit}); the note remains in conversation context.`
+          : `${waveLabel(kind)} reported PARTIAL. Continuing the same wave automatically (${count}/${limit}); no user action is required.`,
       'success'
     );
 
     scheduleAuditContinuation(kind);
     return true;
+  }
+
+  async function watchSupplementalAuditContext(kind, anchor, flow, turns = getChatGPTTurns()) {
+    if (!autoRuntime || !kind || !anchor || !flow?.supplementals?.length) return false;
+
+    if (chatGPTIsGenerating()) {
+      resetIdleStallWatch();
+      scheduleAutoAuditCheck(AUTO_LIVENESS_CHECK_MS);
+      return true;
+    }
+
+    const lastSupplemental = flow.lastSupplemental || flow.supplementals[flow.supplementals.length - 1];
+    const latestAssistant = latestAssistantAfterTurn(lastSupplemental, turns);
+    const fingerprint = `sidecar:${kind}:${getTurnId(lastSupplemental) || textFingerprint(getTurnText(lastSupplemental))}:${assistantFingerprint(latestAssistant) || 'no-assistant'}`;
+    const now = Date.now();
+
+    if (autoRuntime.idleStallKey !== fingerprint) {
+      autoRuntime.idleStallKey = fingerprint;
+      autoRuntime.idleStallSince = now;
+      saveAutoRuntime({ pauseOnFailure: false });
+      setStatus(
+        `${waveLabel(kind)}: supplemental user context detected inside the active audit lineage. Auto3 is waiting briefly for an audit-shaped response before deciding whether a same-wave continuation is needed.`,
+        'info'
+      );
+      scheduleAutoAuditCheck(Math.min(AUTO_LIVENESS_CHECK_MS, AUTO_SIDECAR_RECOVERY_GRACE_MS + 100));
+      return true;
+    }
+
+    const elapsed = now - (Number(autoRuntime.idleStallSince) || now);
+    if (elapsed < AUTO_SIDECAR_RECOVERY_GRACE_MS) {
+      scheduleAutoAuditCheck(Math.min(
+        AUTO_LIVENESS_CHECK_MS,
+        AUTO_SIDECAR_RECOVERY_GRACE_MS - elapsed + 100
+      ));
+      return true;
+    }
+
+    const ready = chatGPTComposerReadyForAutoSend();
+    if (!ready.ok) {
+      // A human may be adding another note/file. Do not PAUSE and never overwrite
+      // the composer; simply remain in the active lineage until it becomes safe.
+      setStatus(
+        `${waveLabel(kind)}: supplemental context is still being edited or ChatGPT is busy. Auto3 remains armed and will continue automatically when the composer is safe.`,
+        'info'
+      );
+      scheduleAutoAuditCheck(AUTO_LIVENESS_CHECK_MS);
+      return true;
+    }
+
+    resetIdleStallWatch({ save: false });
+    return queueSameWaveContinuation(kind, 'sidecar');
   }
 
   function auditStallFingerprint(kind, assistant) {
@@ -3573,8 +8645,9 @@ function assistantTextCandidates(turn) {
   // right before execution; every async boundary (browser yield, attachment
   // registration, send-ready wait) re-verifies that the composer still holds
   // exactly the Auto3-owned content and that the lease token is still current.
-  function createAutoSendOwnershipGuard(token, initialSnapshot) {
+  function createAutoSendOwnershipGuard(token, initialSnapshot, options = {}) {
     const initial = initialSnapshot || chatGPTComposerStateSnapshot();
+    const allowInitialAttachments = options.allowInitialAttachments === true;
     let afterWrite = null;
 
     return {
@@ -3584,10 +8657,8 @@ function assistantTextCandidates(turn) {
         const current = chatGPTComposerStateSnapshot();
         if (!current) return false;
         if (!afterWrite) {
-          // Before the first Auto3 mutation the composer must still be the
-          // verified empty snapshot; a manual draft or attachment that appeared
-          // during the async gap aborts the automatic transaction.
-          return sameComposerState(initial, current) && !cleanTurnText(current.text) && !current.tiles.length;
+          if (!sameComposerState(initial, current) || cleanTurnText(current.text)) return false;
+          return allowInitialAttachments || !current.tiles.length;
         }
         return sameComposerState(afterWrite, current);
       },
@@ -3600,6 +8671,9 @@ function assistantTextCandidates(turn) {
   function chatGPTComposerReadyForAutoSend() {
     const site = detectSite();
     if (site.key !== 'chatgpt') return { ok: false, reason: 'ChatGPT only.' };
+    if (chatGPTAuthInterstitialVisible() || chatGPTRootIsQuarantined()) {
+      return { ok: false, reason: 'ChatGPT logged-out/account surface is active.' };
+    }
     const input = cachedSiteElement(site, 'input');
     const root = chatGPTComposerRoot();
     if (!input || !root || root.hasAttribute('inert')) return { ok: false, reason: 'Main ChatGPT composer is not available.' };
@@ -3670,55 +8744,153 @@ function assistantTextCandidates(turn) {
     return header.join('\n').trim();
   }
 
+  function auditIntegritySpec(stage) {
+    if (stage === 'wait-core') {
+      return {
+        prefix: 'CORE',
+        fields: ['EVIDENCE', 'DEFECT', 'REPAIR', 'VERIFY'],
+        noFindings: /^\s*NO\s+VERIFIED\s+CORE\s+DEFECTS\.?\s*$/im,
+        doneLabel: 'CORE_DONE_WHEN'
+      };
+    }
+    if (stage === 'wait-second') {
+      return {
+        prefix: 'W2',
+        fields: ['EVIDENCE', 'DEFECT', 'REPAIR', 'VERIFY'],
+        noFindings: /^\s*NO\s+NEW\s+VERIFIED\s+SECOND[-\s]*WAVE\s+DEFECTS\.?\s*$/im,
+        doneLabel: 'SECOND_WAVE_DONE_WHEN'
+      };
+    }
+    if (stage === 'wait-performance') {
+      return {
+        prefix: 'PERF',
+        fields: ['EVIDENCE', 'ISSUE', 'OPTIMIZE', 'GUARDRAIL', 'VERIFY'],
+        noFindings: /^\s*NO\s+MATERIAL\s+PERFORMANCE\s*\/\s*STABILITY\s+FINDINGS\.?\s*$/im,
+        doneLabel: 'PERFORMANCE_DONE_WHEN'
+      };
+    }
+    return null;
+  }
+
+  function auditHandoffIntegrity(stage, body, gateSpec = auditGateSpec(stage)) {
+    const integritySpec = auditIntegritySpec(stage);
+    if (!integritySpec || !gateSpec || !body) {
+      return { valid: false, reason: 'unsupported-wave', declared: 0, found: 0 };
+    }
+
+    const scoped = normalizeAuditResponseText(body);
+    const header = handoffHeader(scoped);
+    const ticketsMatch = header.match(/^\s*TICKETS\s*:\s*(\d+)\s*$/im);
+    if (!ticketsMatch) {
+      return { valid: false, reason: 'missing-tickets-count', declared: 0, found: 0 };
+    }
+
+    const declared = Number(ticketsMatch[1]);
+    if (!Number.isInteger(declared) || declared < 0 || declared > 999) {
+      return { valid: false, reason: 'invalid-tickets-count', declared, found: 0 };
+    }
+
+    const doneMatch = scoped.match(gateSpec.done);
+    if (!doneMatch || !String(doneMatch[1] || '').trim() || /^<.*>$/.test(String(doneMatch[1] || '').trim())) {
+      return { valid: false, reason: `missing-${integritySpec.doneLabel.toLowerCase()}`, declared, found: 0 };
+    }
+
+    if (declared === 0) {
+      if (!integritySpec.noFindings.test(scoped)) {
+        return { valid: false, reason: 'zero-ticket-marker-missing', declared, found: 0 };
+      }
+      return { valid: true, reason: 'ok', declared: 0, found: 0 };
+    }
+
+    const ticketRegex = new RegExp(
+      `^\\s*\\[P[012]\\]\\s*\\[${integritySpec.prefix}-(\\d{3})\\]\\s+.+$`,
+      'gmi'
+    );
+    const matches = [...scoped.matchAll(ticketRegex)];
+    if (matches.length !== declared) {
+      return { valid: false, reason: `ticket-count-mismatch:${matches.length}/${declared}`, declared, found: matches.length };
+    }
+
+    const seen = new Set();
+    for (let index = 0; index < matches.length; index += 1) {
+      const numeric = Number(matches[index][1]);
+      const expected = index + 1;
+      if (numeric !== expected) {
+        return { valid: false, reason: `ticket-sequence:${String(numeric).padStart(3, '0')}!=${String(expected).padStart(3, '0')}`, declared, found: matches.length };
+      }
+      if (seen.has(numeric)) {
+        return { valid: false, reason: `duplicate-ticket:${String(numeric).padStart(3, '0')}`, declared, found: matches.length };
+      }
+      seen.add(numeric);
+
+      const blockStart = matches[index].index;
+      const blockEnd = index + 1 < matches.length ? matches[index + 1].index : doneMatch.index;
+      if (!Number.isInteger(blockStart) || !Number.isInteger(blockEnd) || blockEnd <= blockStart) {
+        return { valid: false, reason: `truncated-ticket:${integritySpec.prefix}-${String(numeric).padStart(3, '0')}`, declared, found: matches.length };
+      }
+      const block = scoped.slice(blockStart, blockEnd);
+      for (const field of integritySpec.fields) {
+        const fieldRegex = new RegExp(`^\\s*${field}\\s*:\\s*\\S`, 'im');
+        if (!fieldRegex.test(block)) {
+          return { valid: false, reason: `missing-${field.toLowerCase()}:${integritySpec.prefix}-${String(numeric).padStart(3, '0')}`, declared, found: matches.length };
+        }
+      }
+    }
+
+    const lastTicket = matches[matches.length - 1];
+    if (!Number.isInteger(doneMatch.index) || doneMatch.index <= lastTicket.index) {
+      return { valid: false, reason: `${integritySpec.doneLabel.toLowerCase()}-before-last-ticket`, declared, found: matches.length };
+    }
+    return { valid: true, reason: 'ok', declared, found: matches.length };
+  }
+
   function concreteHandoffState(stage, body, spec) {
     if (!spec || !body) return 'unknown';
-    const scoped = normalizeAuditResponseText(body).slice(0, 120000);
+    const scoped = normalizeAuditResponseText(body);
     const header = handoffHeader(scoped);
     if (!header) return 'unknown';
 
     const waveLine = header.match(/^\s*WAVE\s*:\s*(.+)$/im)?.[1] || '';
     const ticketsLine = header.match(/^\s*TICKETS\s*:\s*(\d+)\s*$/im);
     const handoffLine = header.match(/^\s*HANDOFF\s*:\s*IMPLEMENTATION_AGENT\s*$/im);
+    const structuredEnough = Boolean(waveLine && spec.wave.test(waveLine) && ticketsLine && handoffLine);
 
-    if (waveLine && spec.wave.test(waveLine) && ticketsLine && handoffLine) {
+    if (structuredEnough) {
       const structuredStatus = header.match(spec.status);
-      if (structuredStatus) return gateState(structuredStatus[1]);
+      if (structuredStatus) {
+        const terminal = gateState(structuredStatus[1]);
+        if (terminal !== 'complete') return terminal;
+        const integrity = auditHandoffIntegrity(stage, scoped, spec);
+        return integrity.valid ? 'complete' : 'partial';
+      }
     }
 
-    // Compatibility with older compact handoffs: direct wave status is accepted
-    // only from the header region, never from quoted ticket evidence below it.
     const explicit = header.match(spec.explicit);
     if (explicit && (waveLine ? spec.wave.test(waveLine) : header.split('\n').length <= 16)) {
-      return gateState(explicit[1]);
-    }
-
-    // Structural COMPLETE fallback when only STATUS was omitted. This still needs
-    // concrete numeric tickets + handoff + DONE_WHEN, so echoed templates fail.
-    const doneLine = scoped.match(spec.done);
-    if (waveLine && spec.wave.test(waveLine) && ticketsLine && handoffLine && doneLine) {
-      const doneValue = String(doneLine[1] || '').trim();
-      if (doneValue && !/^<.*>$/.test(doneValue)) return 'complete';
+      const terminal = gateState(explicit[1]);
+      if (terminal !== 'complete') return terminal;
+      // A legacy explicit COMPLETE is only authoritative when it is the same
+      // canonical wave status pattern. Missing STATUS remains unknown so Strict
+      // mode cannot infer terminal authority from ticket shape alone.
+      if (!header.match(spec.status)) return 'unknown';
+      const integrity = auditHandoffIntegrity(stage, scoped, spec);
+      return integrity.valid ? 'complete' : 'partial';
     }
 
     return 'unknown';
   }
 
   function responseGate(stage, text) {
-    const body = normalizeAuditResponseText(text);
-    if (!body) return 'unknown';
-    const scoped = body.slice(0, 120000);
+    const scoped = normalizeAuditResponseText(text);
+    if (!scoped) return 'unknown';
     const spec = auditGateSpec(stage);
     if (!spec) return 'unknown';
 
     const concrete = concreteHandoffState(stage, scoped, spec);
     if (concrete !== 'unknown') return concrete;
 
-    // A truly concise hard precondition failure is allowed without a full handoff.
-    // Nested evidence snippets cannot win because this is evaluated on the whole
-    // assistant answer first and is intentionally restricted to a leading BLOCKED.
     const firstNonEmpty = scoped.split('\n').find(line => line.trim()) || '';
     if (/^\s*BLOCKED\s*:/i.test(firstNonEmpty) && scoped.length <= 12000) return 'blocked';
-
     return 'unknown';
   }
 
@@ -3760,6 +8932,13 @@ function assistantTextCandidates(turn) {
     if (!autoRuntime) return { text: 'Auto chain initializing for this chat...', kind: 'info' };
     if (!autoRuntime.enabled) return { text: 'Auto 3 waves is disabled for this chat. Saved progress is preserved.', kind: 'info' };
 
+    if (chatGPTAuthInterstitialVisible()) {
+      return {
+        text: 'AUTH HOLD: ChatGPT account/login UI is covering this page. Auto3 remains enabled and frozen safely until the chat becomes usable again.',
+        kind: 'warning'
+      };
+    }
+
     const lease = readAutoLease(autoBoundConversationKey || currentConversationKey());
     if (
       lease &&
@@ -3773,18 +8952,29 @@ function assistantTextCandidates(turn) {
       };
     }
 
+    if (autoComposerHoldReason) {
+      return {
+        text: `Auto3 HOLD: ${autoComposerHoldReason} Waiting safely and retrying automatically; existing draft/attachments are never overwritten.`,
+        kind: 'info'
+      };
+    }
+
     const continuationKind = String(autoRuntime.continuationKind || '');
     const continuationReason = String(autoRuntime.continuationReason || 'partial');
     const continuationCount = continuationKind
       ? Number(
         continuationReason === 'stall'
           ? autoRuntime.stallNudges?.[continuationKind]
-          : autoRuntime.partialContinuations?.[continuationKind]
+          : continuationReason === 'sidecar'
+            ? autoRuntime.sidecarRecoveries?.[continuationKind]
+            : autoRuntime.partialContinuations?.[continuationKind]
       ) || 0
       : 0;
     const continuationLimit = continuationReason === 'stall'
       ? AUTO_MAX_STALL_NUDGES
-      : AUTO_MAX_PARTIAL_CONTINUATIONS;
+      : continuationReason === 'sidecar'
+        ? AUTO_MAX_SIDECAR_RECOVERIES
+        : AUTO_MAX_PARTIAL_CONTINUATIONS;
 
     const labels = {
       idle: 'Armed. Waiting for a NEW latest AUDIT CORE. Active chain state is persisted across tab/browser close.',
@@ -3797,13 +8987,29 @@ function assistantTextCandidates(turn) {
       'wait-performance': '3/3 Performance is running. Waiting for COMPLETE.',
       'sending-continuation': continuationReason === 'stall'
         ? `${waveLabel(continuationKind)} went idle without a terminal status. Sending a recovery nudge (${continuationCount}/${continuationLimit})...`
-        : `${waveLabel(continuationKind)} returned PARTIAL. Continuing the SAME wave automatically (${continuationCount}/${continuationLimit})...`,
-      'await-continuation-user': `${waveLabel(continuationKind)} ${continuationReason === 'stall' ? 'recovery nudge' : 'continuation'} was sent. Waiting for ChatGPT to register it.`,
+        : continuationReason === 'sidecar'
+          ? `${waveLabel(continuationKind)} received supplemental user context. Continuing the SAME wave automatically (${continuationCount}/${continuationLimit})...`
+          : `${waveLabel(continuationKind)} returned PARTIAL. Continuing the SAME wave automatically (${continuationCount}/${continuationLimit})...`,
+      'await-continuation-user': `${waveLabel(continuationKind)} ${continuationReason === 'stall' ? 'recovery nudge' : continuationReason === 'sidecar' ? 'supplemental-context continuation' : 'continuation'} was sent. Waiting for ChatGPT to register it.`,
       complete: '3/3 COMPLETE. All three audit waves finished; any PARTIAL/stall recovery was handled automatically.',
       paused: `Paused: ${autoRuntime.pausedReason || 'manual attention required.'}`
     };
 
     let text = labels[autoRuntime.stage] || `Auto chain state: ${autoRuntime.stage}`;
+    if (
+      autoRuntime.anchorMissingSince &&
+      ['wait-core', 'wait-second', 'wait-performance'].includes(autoRuntime.stage)
+    ) {
+      text += ' User anchor is currently virtualized; live-response recovery is active.';
+    }
+    if (['wait-core', 'wait-second', 'wait-performance'].includes(autoRuntime.stage)) {
+      const summaryTurns = getChatGPTTurns();
+      const stageAnchor = findTurnById(activeStageAnchorId(autoRuntime.stage), summaryTurns);
+      const supplementalCount = stageAnchor ? sidecarContextCountAfter(stageAnchor, summaryTurns) : 0;
+      if (supplementalCount) {
+        text += ` Supplemental context: ${supplementalCount} user note${supplementalCount === 1 ? '' : 's'} preserved inside this wave.`;
+      }
+    }
     if (
       autoRuntime.idleStallSince &&
       ['wait-core', 'wait-second', 'wait-performance'].includes(autoRuntime.stage) &&
@@ -3826,10 +9032,787 @@ function assistantTextCandidates(turn) {
     return { text, kind };
   }
 
+  function autoProgressSnapshot() {
+    const rawStage = String(autoRuntime?.stage || 'idle');
+    const stage = rawStage === 'paused'
+      ? String(autoRuntime?.pausedFromStage || 'paused')
+      : rawStage;
+    const continuationKind = String(autoRuntime?.continuationKind || '');
+    const continuationStep = continuationKind === 'core'
+      ? 1
+      : continuationKind === 'second'
+        ? 2
+        : continuationKind === 'performance'
+          ? 3
+          : 0;
+    const activeStep = stage === 'wait-core' ? 1
+      : ['sending-second', 'await-second-user', 'wait-second'].includes(stage) ? 2
+        : ['sending-performance', 'await-performance-user', 'wait-performance'].includes(stage) ? 3
+          : ['sending-continuation', 'await-continuation-user'].includes(stage) ? continuationStep
+            : rawStage === 'complete' ? 4
+              : 0;
+    const pausedStep = rawStage === 'paused' ? activeStep : 0;
+    const recoveryStep = ['sending-continuation', 'await-continuation-user'].includes(stage)
+      ? continuationStep
+      : 0;
+
+    return { rawStage, stage, activeStep, pausedStep, recoveryStep };
+  }
+
+  function renderProgressContainer(container, snapshot = autoProgressSnapshot()) {
+    if (!container) return;
+    const coherentResults = new Map(currentChatAuditRecords().map(record => [record.kind, record]));
+    for (const step of container.querySelectorAll('[data-step]')) {
+      const number = Number(step.dataset.step);
+      const kind = auditKindFromStep(number);
+      const result = kind ? (coherentResults.get(kind) || null) : null;
+      const done = snapshot.activeStep === 4 || (snapshot.activeStep > 0 && number < snapshot.activeStep);
+      const stateName = done
+        ? 'done'
+        : number === snapshot.pausedStep
+          ? 'paused'
+          : number === snapshot.recoveryStep
+            ? 'recover'
+            : number === snapshot.activeStep
+              ? 'active'
+              : 'idle';
+      step.dataset.state = stateName;
+      const copyReady = Boolean(result?.text);
+      const copied = copyReady && copiedAuditKind === kind && copiedAuditUntil > Date.now();
+      step.dataset.copyReady = copyReady ? 'true' : 'false';
+      step.dataset.copied = copied ? 'true' : 'false';
+      step.setAttribute('role', 'button');
+      step.setAttribute('tabindex', '0');
+
+      const mini = container.id === 'acb-super-progress';
+      const normalLabels = { core: 'Core', second: 'Second', performance: 'Perf' };
+      step.textContent = copied
+        ? (mini ? `${number}C` : `${number} COPIED`)
+        : copyReady
+          ? (mini ? `${number}✓` : `${number} ${normalLabels[kind]} ✓`)
+          : (mini ? String(number) : `${number} ${normalLabels[kind]}`);
+
+      step.setAttribute('aria-label', copyReady
+        ? `${auditWaveTitle(kind)} complete. Click to COPY the cached handoff.`
+        : `${auditWaveTitle(kind)} is ${stateName}. No completed handoff is cached yet.`);
+      step.title = copyReady
+        ? `COPY ${auditWaveTitle(kind)}${result.testStatus ? ` · ${result.testStatus}` : ''}${Number(result.bridgeSavedAt) > 0 ? ' · disk saved' : ''}`
+        : `${auditWaveTitle(kind)} · ${stateName}`;
+    }
+  }
+
+
+  function trivialStartComposerNoise(text) {
+    const cleaned = cleanTurnText(text);
+    if (!cleaned || cleaned.includes('\n')) return false;
+    return Array.from(cleaned).length <= 2;
+  }
+
+  function prepareComposerForExplicitAuditStart() {
+    const root = chatGPTComposerRoot();
+    const input = getChatGPTInput();
+    if (!root || !input || root.hasAttribute('inert')) {
+      return { ok: false, reason: 'Main ChatGPT composer is not available.' };
+    }
+
+    const draft = cleanTurnText(composerPlainText(input));
+    if (!draft) return { ok: true, clearedNoise: false };
+
+    // Explicit START owns the canonical Core message, but it may absorb only a
+    // microscopic accidental keystroke. Substantive user text is protected.
+    if (!trivialStartComposerNoise(draft)) {
+      return {
+        ok: false,
+        reason: 'Composer contains a manual draft. START will not merge that text into the canonical Audit Core command.'
+      };
+    }
+
+    if (!smartSet(input, '')) {
+      return { ok: false, reason: 'Could not clear the tiny accidental composer fragment before START.' };
+    }
+    if (cleanTurnText(composerPlainText(input))) {
+      return { ok: false, reason: 'The accidental composer fragment could not be verified as cleared.' };
+    }
+
+    return { ok: true, clearedNoise: true, clearedText: draft };
+  }
+
+  function startHandoffComposerStillPrepared(handoff = readStartAuditHandoff()) {
+    if (!handoff || !['armed', 'clicking'].includes(handoff.phase) || !handoff.receipt) return false;
+    const input = getChatGPTInput();
+    if (!input) return false;
+    const text = cleanTurnText(composerPlainText(input));
+    return Boolean(
+      text &&
+      classifyAuditMessage(text) === 'core' &&
+      text.includes(`${AUTO_SEND_RECEIPT_PREFIX}: ${handoff.receipt}`)
+    );
+  }
+
+  async function recoverArmedStartSend(options = {}) {
+    if (auditStartInFlight || actionInFlight) return false;
+    let handoff = readStartAuditHandoff();
+    if (!handoff || !startHandoffIsPrepared(handoff)) return false;
+
+    // A previous click may have succeeded just before navigation/unload. Exact
+    // receipt evidence upgrades the checkpoint without ever clicking again.
+    if (handoff.receipt && exactReceiptUserTurn(handoff.receipt, getChatGPTTurns())) {
+      handoff = markStartAuditHandoffSent(handoff) || readStartAuditHandoff() || handoff;
+      recoverSentStartCore({ source: 'prepared-visible-receipt', skipMonitor: true });
+      scheduleSentStartRecovery();
+      scheduleAutoAuditCheck(0);
+      return true;
+    }
+
+    if (!startHandoffComposerStillPrepared(handoff)) return false;
+    if (chatGPTIsGenerating() || chatGPTAuthInterstitialVisible() || chatGPTRootIsQuarantined()) return false;
+
+    bindAutoRuntimeToCurrentConversation({ claim: false });
+    if (!autoRuntime) return false;
+    const wasEnabled = Boolean(autoRuntime.enabled);
+    if (!wasEnabled) {
+      // Enable only in memory so lease acquisition can be attempted without
+      // writing shared runtime from a standby tab.
+      autoRuntime.enabled = true;
+      autoRuntime.conversationKey = autoBoundConversationKey || currentConversationKey();
+    }
+
+    const token = await verifyAutoLeaseForSend();
+    if (!token) {
+      if (!wasEnabled) refreshAutoRuntimeFromStorage();
+      setStatus('START AUDITING is prepared, but another tab owns Auto3. This tab will not click Send; the exact receipt remains recoverable.', 'info');
+      if (options.reschedule !== false) scheduleAutoAuditCheck(900);
+      return false;
+    }
+    if (!wasEnabled) {
+      writeA3Intent(true, autoRuntime.conversationKey, { startTransaction: true });
+      if (!saveAutoRuntime({ pauseOnFailure: false })) return false;
+    }
+
+    const initial = chatGPTComposerStateSnapshot();
+    if (!initial) return false;
+    const ownership = createAutoSendOwnershipGuard(token, initial, { allowInitialAttachments: true });
+    ownership.captureWrite();
+
+    const waitMs = Math.max(250, Number(options.waitMs) || 1800);
+    const send = await waitForChatGPTSendReady(waitMs);
+    if (!send || !startHandoffComposerStillPrepared(handoff) || !(await ownership.verify())) {
+      if (options.reschedule !== false) scheduleAutoAuditCheck(700);
+      return false;
+    }
+
+    const current = getChatGPTSend();
+    if (!current || !current.isConnected || current.disabled || current.getAttribute('aria-disabled') === 'true') {
+      if (options.reschedule !== false) scheduleAutoAuditCheck(500);
+      return false;
+    }
+
+    if (!(await ownership.verify())) return false;
+    const clicking = markStartAuditHandoffClicking(handoff);
+    if (!clicking) return false;
+
+    const input = rawChatGPTComposerInput();
+    const accepted = await clickChatGPTSendVerified(current, input, {
+      receipt: String(clicking.receipt || ''),
+      autoOwnership: ownership
+    });
+    if (!accepted) {
+      setStatus('START AUDITING found Send, but submission is still unverified. The exact START receipt remains prepared and bounded recovery will retry without creating a second Core.', 'warning');
+      if (options.reschedule !== false) scheduleAutoAuditCheck(650);
+      return false;
+    }
+
+    markStartAuditHandoffSent(clicking);
+    setStatus('START AUDITING verified that the prepared Core left the composer. The one-button audit chain is now running.', 'success');
+    scheduleSentStartRecovery();
+    startAutoAuditMonitor({ immediate: true });
+    renderAutoAuditState();
+    return true;
+  }
+
+  async function startAuditCoreFromReadyAttachment() {
+    if (auditStartInFlight || actionInFlight) {
+      setStatus('START AUDITING is already preparing/sending Audit Core.', 'info');
+      return false;
+    }
+    if (detectSite().key !== 'chatgpt') {
+      setStatus('START AUDITING is available only on ChatGPT.', 'warning');
+      return false;
+    }
+
+    bindAutoRuntimeToCurrentConversation({ claim: false });
+
+    const prepared = readStartAuditHandoff();
+    if (startHandoffIsPrepared(prepared)) {
+      setStatus('START AUDITING already has one canonical Core receipt prepared. Retrying that exact Send instead of creating another audit start.', 'info');
+      return recoverArmedStartSend({ waitMs: 2500, reschedule: true });
+    }
+
+    if (autoRuntime.stage !== 'idle') {
+      setStatus(`START AUDITING ignored: this chat is already in ${superCompactAutoLabel()} state.`, 'warning');
+      renderAutoAuditState();
+      return false;
+    }
+    if (chatGPTIsGenerating()) {
+      setStatus('START AUDITING is waiting because ChatGPT is already generating.', 'warning');
+      renderAutoAuditState();
+      return false;
+    }
+
+    const attachment = chatGPTReadyAttachmentSummary();
+    if (!attachment.ready) {
+      setStatus(`START AUDITING is not ready: ${attachment.reason}`, 'warning');
+      renderAutoAuditState();
+      return false;
+    }
+    const composerPrep = prepareComposerForExplicitAuditStart();
+    if (!composerPrep.ok) {
+      setStatus(`START AUDITING is not ready: ${composerPrep.reason}`, 'warning');
+      renderAutoAuditState();
+      return false;
+    }
+
+    if (!autoRuntime) autoRuntime = emptyAutoRuntime({ enabled: false });
+    const wasEnabled = Boolean(autoRuntime.enabled);
+    if (!wasEnabled) {
+      autoRuntime.enabled = true;
+      autoRuntime.conversationKey = autoBoundConversationKey || currentConversationKey();
+    }
+
+    const token = await verifyAutoLeaseForSend();
+    if (!token) {
+      if (!wasEnabled) refreshAutoRuntimeFromStorage();
+      setStatus('START AUDITING did not acquire the verified Auto3 lease. Another tab may own this chat; nothing was written or sent.', 'warning');
+      renderAutoAuditState();
+      scheduleAutoAuditCheck(900);
+      return false;
+    }
+    if (!wasEnabled) {
+      writeA3Intent(true, autoRuntime.conversationKey, { startTransaction: true });
+      if (!saveAutoRuntime({ pauseOnFailure: false })) {
+        setStatus('START AUDITING acquired ownership but could not persist its Auto3 arming checkpoint. Nothing was sent.', 'error');
+        renderAutoAuditState();
+        return false;
+      }
+    }
+
+    reconcileProjectIdentityFromComposer({ rename: true });
+    const preset = findAuditPreset('core');
+    if (!preset) {
+      setStatus('START AUDITING failed: the canonical Audit Core preset is missing. Reload/reconcile defaults first.', 'error');
+      return false;
+    }
+
+    const startHandoff = beginStartAuditHandoff();
+    if (!startHandoff) {
+      setStatus('START AUDITING could not create its durable handoff checkpoint. Nothing was sent; A3 state was left unchanged.', 'error');
+      renderAutoAuditState();
+      return false;
+    }
+
+    const initialSnapshot = chatGPTComposerStateSnapshot();
+    if (!initialSnapshot) {
+      clearStartAuditHandoff();
+      setStatus('START AUDITING lost the live composer before preparation. Nothing was sent.', 'warning');
+      return false;
+    }
+    const ownership = createAutoSendOwnershipGuard(token, initialSnapshot, { allowInitialAttachments: true });
+
+    auditStartInFlight = true;
+    renderAutoAuditState();
+    try {
+      const startPreset = { ...preset, machineReceipt: startHandoff.receipt };
+      const result = await executePreset(startPreset, 'run', {
+        canonicalComposerOnly: true,
+        autoOwnership: ownership,
+        beforeSend: async () => Boolean(armStartAuditHandoffForSend(startHandoff)),
+        beforeClick: async () => Boolean(isLeaseTokenCurrent(token) && markStartAuditHandoffClicking(startHandoff))
+      });
+
+      if (!result?.sent) {
+        const pending = readStartAuditHandoff();
+        if (startHandoffComposerStillPrepared(pending)) {
+          setStatus(`START AUDITING prepared Core but Send is not positively verified yet (${result?.reason || 'not ready'}). The exact receipt is preserved for lease-fenced retry.`, 'warning');
+          setTimeout(() => {
+            recoverArmedStartSend({ waitMs: 2500, reschedule: true }).catch(() => scheduleAutoAuditCheck(900));
+          }, 80);
+          return false;
+        }
+        if (!startHandoffIsCommitted(pending)) clearStartAuditHandoff();
+        setStatus(`START AUDITING could not verify Audit Core Send (${result?.reason || 'unknown reason'}). No duplicate Core will be manufactured.`, 'warning');
+        return false;
+      }
+
+      markStartAuditHandoffSent(startHandoff);
+      setStatus(`START AUDITING sent Audit Core with ${attachment.count} project attachment${attachment.count === 1 ? '' : 's'}. Preserving Auto3 across ChatGPT route hydration...`, 'success');
+      scheduleSentStartRecovery();
+      bindAutoRuntimeToCurrentConversation({ claim: false });
+      recoverSentStartCore({ source: 'immediate-post-send' });
+      if (!autoRuntime.enabled) {
+        autoRuntime.enabled = true;
+        autoRuntime.conversationKey = autoBoundConversationKey || currentConversationKey();
+        saveAutoRuntime({ pauseOnFailure: false });
+      }
+      startAutoAuditMonitor({ immediate: true });
+      renderAutoAuditState();
+      if (autoRuntime?.projectName) {
+        scheduleConversationTitleGuard(autoRuntime.projectName, {
+          source: autoRuntime.projectNameSource || 'artifact',
+          conversationKey: autoBoundConversationKey || currentConversationKey(),
+          runStartedAt: autoRuntime.startedAt || 0
+        });
+      }
+      return true;
+    } finally {
+      auditStartInFlight = false;
+      const pending = readStartAuditHandoff();
+      if (pending && !startHandoffIsCommitted(pending) && !startHandoffIsPrepared(pending)) clearStartAuditHandoff();
+      renderAutoAuditState();
+    }
+  }
+
+  function currentChatShouldBePreservedForNewChat() {
+    const snapshot = chatGPTComposerStateSnapshot();
+    const hasDraft = Boolean(cleanTurnText(snapshot?.text || ''));
+    const hasAttachments = Boolean(snapshot?.tiles?.length);
+    const activeStage = Boolean(
+      autoRuntime?.enabled &&
+      !['idle', 'complete'].includes(String(autoRuntime.stage || 'idle'))
+    );
+
+    return {
+      preserve: hasDraft || hasAttachments || chatGPTIsGenerating() || activeStage,
+      hasDraft,
+      hasAttachments,
+      activeStage,
+      generating: chatGPTIsGenerating()
+    };
+  }
+
+  function openFreshChatInNewTab() {
+    try {
+      const link = document.createElement('a');
+      link.href = `${location.origin}/`;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function openNewChatFromWidget() {
+    if (detectSite().key !== 'chatgpt') {
+      setStatus('New Chat shortcut is available only on ChatGPT.', 'warning');
+      return false;
+    }
+
+    bindAutoRuntimeToCurrentConversation({ claim: false });
+    if (autoRuntime) saveAutoRuntime({ pauseOnFailure: false });
+
+    const safety = currentChatShouldBePreservedForNewChat();
+    const opened = openFreshChatInNewTab();
+
+    setStatus(
+      opened
+        ? `New Chat opened in a separate tab. This tab was never navigated${safety.preserve ? ' because it contains active/unsaved work' : ''}.`
+        : 'New Chat could not be opened by the browser. The current tab was left untouched.',
+      opened ? 'success' : 'warning'
+    );
+    return opened;
+  }
+
+  function currentChatAuditRecords(conversationKey = autoBoundConversationKey || currentConversationKey()) {
+    if (autoRuntime && autoRuntime.conversationKey === conversationKey && autoRuntime.resetBarrierActive) return [];
+    const storedRuntime = readStoredRuntime(conversationKey);
+    if (storedRuntime.corrupt) return [];
+    if (storedRuntime.runtime?.resetBarrierActive && (!autoRuntime || autoRuntime.conversationKey !== conversationKey)) return [];
+    const orderedKinds = ['core', 'second', 'performance'];
+    const all = orderedKinds
+      .map(kind => readAuditResult(kind, conversationKey))
+      .filter(record => Boolean(record?.text));
+    if (!all.length) return [];
+
+    // Even one cached wave must satisfy lineage. Returning a lone Second or
+    // Performance record used to let idle recovery treat orphaned evidence as a
+    // valid chain and skip directly toward Performance/COMPLETE after a partial
+    // storage failure or manual key deletion.
+    const groups = new Map();
+    for (const record of all) {
+      const runId = String(record.runId || '');
+      // Pre-runId/partially corrupted records have no proof they belong to the
+      // same execution. Never manufacture an ALL_3 lineage by grouping every
+      // missing-run record under one synthetic key.
+      const key = runId || `__legacy__:${record.kind}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(record);
+    }
+
+    let selected = null;
+    const runtimeRunId = (
+      autoRuntime &&
+      String(autoRuntime.conversationKey || '') === String(conversationKey) &&
+      autoRuntime.runId
+    ) ? String(autoRuntime.runId) : '';
+
+    if (runtimeRunId) {
+      // An active/rebuilt runtime is the strongest run authority. If none of its
+      // waves is cached yet, showing or saving an older completed run would make
+      // a fresh Core look DONE and could rebuild stale ALL_3 output mid-run.
+      if (!groups.has(runtimeRunId)) return [];
+      selected = groups.get(runtimeRunId);
+    } else {
+      // Without a bound run, recover the newest cached lineage as a whole instead
+      // of manufacturing an impossible Core/Second/Performance combination.
+      selected = [...groups.values()].sort((left, right) => {
+        const newest = records => Math.max(...records.map(record => Number(record.completedAt || 0)), 0);
+        return newest(right) - newest(left);
+      })[0] || [];
+    }
+
+    const byKind = Object.fromEntries(selected.map(record => [record.kind, record]));
+    if (!byKind.core) return [];
+
+    const coherent = [byKind.core];
+    if (byKind.second) coherent.push(byKind.second);
+    if (byKind.performance && byKind.second) coherent.push(byKind.performance);
+    return coherent;
+  }
+
+  function setAuditAutoSaveEnabled(_next, source = 'UI') {
+    // Compatibility entry point only. Auto-save is a hard invariant now.
+    if (!commitStateMutation(
+      () => { state.autoSaveAuditFiles = true; },
+      'Audit auto-save invariant could not be persisted; the previous state was restored.'
+    )) return false;
+
+    renderAutoAuditState();
+    setStatus(`Auto SAVE on COMPLETE is always enabled (${source}).`, 'success');
+
+    const conversationKey = autoBoundConversationKey || currentConversationKey();
+    if (state.bridgeEnabled) {
+      for (const record of currentChatAuditRecords(conversationKey)) {
+        if (!Number(record.bridgeSavedAt)) enqueueBridgeAuditRecord(record);
+      }
+      flushBridgeQueue({ force: true, conversationKey }).catch(() => { });
+    } else {
+      flushCurrentAuditResultsToFolder().catch(() => { });
+    }
+    return true;
+  }
+
+  async function saveCurrentChatAuditsNow(options = {}) {
+    const conversationKey = autoBoundConversationKey || currentConversationKey();
+
+    if (options.refreshVisible !== false) {
+      backfillVisibleCompletedAuditResults();
+    }
+
+    const records = currentChatAuditRecords(conversationKey);
+    if (!records.length) {
+      setStatus(
+        options.manualSync
+          ? 'SYNC/SAVE: runtime state refreshed and persisted; this chat has no structurally COMPLETE audit wave to write yet.'
+          : 'SAVE: this chat has no cached COMPLETE audit handoff yet.',
+        options.manualSync ? 'info' : 'warning'
+      );
+      renderAutoAuditState();
+      return false;
+    }
+
+    if (!state.bridgeEnabled) {
+      const result = await flushCurrentAuditResultsToFolder({ force: true });
+      setStatus(
+        `${options.manualSync ? 'SYNC/SAVE' : 'SAVE'}: browser fallback wrote ${result.saved}/${result.ready} COMPLETE wave(s)${result.combined ? ' + refreshed ALL_3' : ''}.`,
+        result.saved === result.ready ? 'success' : 'warning'
+      );
+      renderAutoAuditState();
+      return result.saved > 0;
+    }
+
+    // Manual forceAll is a fresh DELIVERY BATCH, not merely another receipt
+    // for the historical audit run. Some bridges deduplicate by run_id + wave,
+    // so every click gets a new delivery run_id shared by Core/Second/Perf.
+    // That preserves ALL_3 grouping while forcing the server down the write path.
+    const materializeRunId = options.forceAll
+      ? createBridgeMaterializeRunId()
+      : '';
+
+    if (options.forceAll) {
+      const validRuns = new Set(records.map(record => String(record.runId || '')).filter(Boolean));
+      let superseded = 0;
+      for (const job of listBridgeJobs()) {
+        if (
+          job.materialize &&
+          job.conversationKey === conversationKey &&
+          validRuns.has(String(job.sourceRunId || job.runId || '')) &&
+          !job.permanent &&
+          !job.deliveredAwaitingAck &&
+          !Number(job.inFlightAt || 0)
+        ) {
+          if (deleteBridgeJob(job.jobId, { signal: false })) superseded += 1;
+        }
+      }
+      if (superseded) signalBridgeQueueChange();
+    }
+
+    for (const record of records) {
+      if (options.forceAll) {
+        enqueueBridgeAuditRecord(record, {
+          force: true,
+          freshReceipt: true,
+          deliveryRunId: materializeRunId,
+          deferFlush: true
+        });
+        continue;
+      }
+
+      if (Number(record.bridgeSavedAt) > 0) continue;
+      const queued = record.bridgeReceipt ? readBridgeJob(record.bridgeReceipt) : null;
+      if (!queued) enqueueBridgeAuditRecord(record, { deferFlush: true });
+    }
+
+    // Health/auth check only. Manual SYNC/SAVE owns the flush so there is no
+    // competing 0ms background worker racing for the same lease.
+    const connected = await checkBridge({
+      force: true,
+      suppressFlush: true
+    });
+
+    if (connected) {
+      await flushBridgeQueueManualReliable(conversationKey, { maxAttempts: 5 });
+    }
+
+    const stats = bridgeQueueStats(conversationKey);
+    const refreshed = currentChatAuditRecords(conversationKey);
+    const durable = refreshed.filter(record => Number(record.bridgeSavedAt) > 0).length;
+    const allThree = refreshed.length === 3;
+    const performance = refreshed.find(record => record.kind === 'performance');
+    const combinedConfirmed = Boolean(
+      performance?.combinedSavedAt ||
+      performance?.combinedFileName
+    );
+
+    if (stats.failed > 0) {
+      setStatus(
+        `${options.manualSync ? 'SYNC/SAVE' : 'SAVE'}: ${durable}/${records.length} wave(s) durable; ${stats.failed} job(s) need bridge/token/config attention. Cached audit text and runtime state are retained.`,
+        'error'
+      );
+      renderAutoAuditState();
+      return false;
+    }
+
+    if (stats.pending > 0 || !connected) {
+      setStatus(
+        `${options.manualSync ? 'SYNC/SAVE' : 'SAVE'}: ${durable}/${records.length} requested wave file(s) have been re-materialized; ${stats.pending} physical write job(s) remain queued and will retry automatically.`,
+        'info'
+      );
+      renderAutoAuditState();
+      return true;
+    }
+
+    setStatus(
+      `${options.manualSync ? 'SYNC/SAVE' : 'SAVE'}: ${durable}/${records.length} COMPLETE wave file(s) physically re-materialized through ACBBridge${allThree ? (combinedConfirmed ? ' · ALL_3 rebuilt/overwritten' : ' · all 3 waves written; bridge did not explicitly confirm ALL_3 in its response') : ''}.`,
+      'success'
+    );
+    renderAutoAuditState();
+    return true;
+  }
+
+  function setManualAuditSyncFeedback(value, duration = 3200) {
+    manualAuditSyncFeedback = String(value || '');
+    manualAuditSyncFeedbackUntil = manualAuditSyncFeedback
+      ? Date.now() + Math.max(500, Number(duration) || 3200)
+      : 0;
+
+    if (manualAuditSyncFeedbackTimer) {
+      clearTimeout(manualAuditSyncFeedbackTimer);
+      manualAuditSyncFeedbackTimer = 0;
+    }
+
+    if (manualAuditSyncFeedbackUntil) {
+      manualAuditSyncFeedbackTimer = setTimeout(() => {
+        manualAuditSyncFeedbackTimer = 0;
+        manualAuditSyncFeedback = '';
+        manualAuditSyncFeedbackUntil = 0;
+        renderAutoAuditState();
+      }, Math.max(500, manualAuditSyncFeedbackUntil - Date.now()));
+    }
+
+    renderAutoAuditState();
+  }
+
+  async function syncSaveCurrentChatStateNow() {
+    if (manualAuditSyncInFlight) {
+      setStatus('SYNC/SAVE is already refreshing this chat.', 'info');
+      return false;
+    }
+
+    manualAuditSyncInFlight = true;
+    setManualAuditSyncFeedback('');
+    renderAutoAuditState();
+
+    try {
+      bindAutoRuntimeToCurrentConversation({ claim: false });
+      const conversationKey = autoBoundConversationKey || currentConversationKey();
+
+      // Persist the exact current runtime snapshot first: stage, pause/hold
+      // lineage, user anchors, project/run id, receipts and progress survive
+      // reload even if disk persistence later fails.
+      let runtimePersisted = true;
+      if (autoRuntime) {
+        autoRuntime.conversationKey = conversationKey;
+        runtimePersisted = saveAutoRuntime({ pauseOnFailure: false });
+      }
+
+      const captured = backfillVisibleCompletedAuditResults();
+      renderAutoAuditState();
+
+      const beforeSave = currentChatAuditRecords(conversationKey);
+      const result = await saveCurrentChatAuditsNow({
+        forceAll: true,
+        refreshVisible: false,
+        manualSync: true
+      });
+
+      // Rebind/repaint after bridge work because ChatGPT may have hydrated a
+      // turn or changed route while disk I/O was in flight.
+      bindAutoRuntimeToCurrentConversation({ claim: false });
+      backfillVisibleCompletedAuditResults();
+
+      if (autoRuntime) {
+        autoRuntime.conversationKey = autoBoundConversationKey || currentConversationKey();
+        saveAutoRuntime({ pauseOnFailure: false });
+      }
+
+      const afterSave = currentChatAuditRecords();
+      const allThree = afterSave.length === 3;
+      const stats = state.bridgeEnabled ? bridgeQueueStats(autoBoundConversationKey || currentConversationKey()) : {
+        pending: 0,
+        failed: 0
+      };
+
+      renderAutoAuditState();
+
+      if (!afterSave.length) {
+        setStatus(
+          `SYNC/SAVE: current runtime ${runtimePersisted ? 'persisted' : 'could not be durably persisted'}; no structurally COMPLETE wave exists yet. In-progress/partial assistant text was intentionally not written as a finished audit.`,
+          runtimePersisted ? 'info' : 'warning'
+        );
+        setManualAuditSyncFeedback(runtimePersisted ? 'SYNCED' : 'SAVE!');
+        return runtimePersisted;
+      }
+
+      if (stats.failed > 0) {
+        setStatus(
+          `SYNC/SAVE: refreshed current chat and found ${afterSave.length}/3 COMPLETE wave(s); ${stats.failed} bridge save job(s) failed physical-write verification. Nothing was discarded.`,
+          'error'
+        );
+        setManualAuditSyncFeedback('SAVE!', 5000);
+        return false;
+      }
+
+      if (stats.pending > 0) {
+        setStatus(
+          `SYNC/SAVE: refreshed current chat and found ${afterSave.length}/3 COMPLETE wave(s); ${stats.pending} physical write job(s) are still queued. Runtime state is persisted.`,
+          'info'
+        );
+        setManualAuditSyncFeedback('QUEUE', 4200);
+        return true;
+      }
+
+      setStatus(
+        `SYNC/SAVE: refreshed current chat; physical rewrite completed for ${afterSave.length}/3 COMPLETE wave(s)${allThree ? ' plus ALL_3 rebuild' : ''}${captured ? ' · newly visible COMPLETE result(s) were captured first' : ''}. Runtime state is persisted.`,
+        result === false ? 'warning' : 'success'
+      );
+      setManualAuditSyncFeedback(result === false ? 'SAVE!' : 'SAVED', result === false ? 5000 : 3200);
+      return result !== false;
+    } finally {
+      manualAuditSyncInFlight = false;
+      renderAutoAuditState();
+    }
+  }
+
+  function currentAuditSaveAttention(jobsSnapshot = null, recordsSnapshot = null) {
+    if (!state?.autoSaveAuditFiles) return false;
+    if (state.bridgeEnabled) {
+      const stats = currentBridgeSaveState(autoBoundConversationKey || currentConversationKey(), jobsSnapshot);
+      return stats.pending > 0 || stats.failed > 0;
+    }
+    const results = Array.isArray(recordsSnapshot) ? recordsSnapshot : currentChatAuditRecords();
+    if (!results.length) return false;
+    return results.some(record => !record.savedAt) && auditDirectoryState !== 'ready';
+  }
+
+  function autoVisualPhase() {
+    if (!autoRuntime) return 'idle';
+
+    const stage = String(autoRuntime.stage || 'idle');
+    if (stage === 'complete') return 'done';
+    if (stage === 'paused') return 'attention';
+    if (stage === 'wait-core') return 'core';
+
+    if (['sending-second', 'await-second-user', 'wait-second'].includes(stage)) {
+      return 'second';
+    }
+
+    if (['sending-performance', 'await-performance-user', 'wait-performance'].includes(stage)) {
+      return 'performance';
+    }
+
+    if (['sending-continuation', 'await-continuation-user'].includes(stage)) {
+      const kind = String(autoRuntime.continuationKind || '');
+      if (kind === 'core') return 'core';
+      if (kind === 'second') return 'second';
+      if (kind === 'performance') return 'performance';
+    }
+
+    return 'idle';
+  }
+
+  function superCompactAutoLabel(jobsSnapshot = null, recordsSnapshot = null) {
+    if (chatGPTRootIsQuarantined() || autoBoundConversationKey?.startsWith('auth:')) return 'AUTH';
+    if (!autoRuntime) return 'INIT';
+    if (!autoRuntime.enabled) return 'CHAT';
+
+    const lease = readAutoLease(autoBoundConversationKey || currentConversationKey());
+    if (lease && lease.ownerId && lease.ownerId !== autoInstanceId && lease.expiresAt > Date.now()) return 'STBY';
+    if (autoRuntime.stage === 'paused') return 'PAUSE';
+    if (autoComposerHoldReason) return 'HOLD';
+    if (autoRuntime.stage === 'complete') {
+      const bridgeSave = currentBridgeSaveState(autoBoundConversationKey || currentConversationKey(), jobsSnapshot);
+      if (state?.bridgeEnabled && bridgeSave.failed > 0) return '!';
+      if (currentAuditSaveAttention(jobsSnapshot, recordsSnapshot)) return 'SAVE';
+      return 'DONE';
+    }
+    if (autoRuntime.anchorMissingSince) return 'VIRT';
+    if (autoRuntime.continuationKind) return autoRuntime.continuationReason === 'stall' ? 'REC' : 'PART';
+    if (chatGPTAuthInterstitialVisible()) return 'AUTH';
+    const records = Array.isArray(recordsSnapshot) ? recordsSnapshot : currentChatAuditRecords();
+    if (autoRuntime.stage === 'idle' && records.length) return 'REC';
+    if (autoRuntime.stage === 'idle') return 'READY';
+    if (autoRuntime.stage === 'wait-core') return 'CORE';
+    if (['sending-second', 'await-second-user', 'wait-second'].includes(autoRuntime.stage)) return 'W2';
+    if (['sending-performance', 'await-performance-user', 'wait-performance'].includes(autoRuntime.stage)) return 'PERF';
+    return 'AUTO';
+  }
+
   function renderAutoAuditState() {
     if (!panel || !state) return;
 
     const enabled = panel.querySelector('#acb-auto-enabled');
+    const superEnabled = panel.querySelector('#acb-super-enabled');
+    const superBrand = panel.querySelector('#acb-super-brand');
+    const superStatus = panel.querySelector('#acb-super-state');
+    const superProgress = panel.querySelector('#acb-super-progress');
+    const renameToggle = panel.querySelector('#acb-auto-rename-chat');
+    const saveNow = panel.querySelector('#acb-save-now');
+    const bridgeToggle = panel.querySelector('#acb-bridge-enabled');
+    const bridgeUrlInput = panel.querySelector('#acb-bridge-url');
     const strict = panel.querySelector('#acb-auto-gate');
     const delay = panel.querySelector('#acb-auto-delay');
     const timeout = panel.querySelector('#acb-auto-timeout');
@@ -3839,8 +9822,25 @@ function assistantTextCandidates(turn) {
     const adopt = panel.querySelector('#acb-auto-adopt');
     const reset = panel.querySelector('#acb-auto-reset');
     const stop = panel.querySelector('#acb-auto-stop');
+    const bridgeJobsSnapshot = listBridgeJobs();
+    const auditRecordsSnapshot = currentChatAuditRecords();
 
     if (enabled) enabled.checked = Boolean(autoRuntime?.enabled);
+    if (superEnabled) superEnabled.checked = Boolean(autoRuntime?.enabled);
+
+    if (superBrand) {
+      const identity = currentMiniIdentity();
+      superBrand.textContent = identity.label;
+      superBrand.dataset.identity = identity.kind;
+      superBrand.title = identity.kind === 'project'
+        ? `Current audit project: ${identity.label}`
+        : identity.kind === 'chat-title'
+          ? `Current chat: ${identity.label}`
+          : 'No audit project detected in this chat.';
+    }
+    if (renameToggle) renameToggle.checked = Boolean(state.autoRenameChat);
+    if (bridgeToggle) bridgeToggle.checked = Boolean(state.bridgeEnabled);
+    if (bridgeUrlInput && document.activeElement !== bridgeUrlInput) bridgeUrlInput.value = state.bridgeUrl || BRIDGE_DEFAULT_URL;
     if (strict) strict.value = state.autoAuditStrictGate ? 'strict' : 'relaxed';
     if (delay) delay.value = String(state.autoAuditDelayMs);
     if (timeout) timeout.value = String(state.autoAuditTimeoutMin);
@@ -3850,38 +9850,115 @@ function assistantTextCandidates(turn) {
     if (status) {
       status.textContent = summary.text;
       status.dataset.kind = summary.kind;
+      status.dataset.phase = autoVisualPhase();
+      status.dataset.hold = autoComposerHoldReason ? 'true' : 'false';
       status.title = summary.text;
     }
 
-    if (progress) {
-      const rawStage = String(autoRuntime?.stage || 'idle');
-      const stage = rawStage === 'paused'
-        ? String(autoRuntime?.pausedFromStage || 'paused')
-        : rawStage;
-      const continuationKind = String(autoRuntime?.continuationKind || '');
-      const continuationStep = continuationKind === 'core'
-        ? 1
-        : continuationKind === 'second'
-          ? 2
-          : continuationKind === 'performance'
-            ? 3
-            : 0;
-      const activeStep = stage === 'wait-core' ? 1
-        : ['sending-second', 'await-second-user', 'wait-second'].includes(stage) ? 2
-          : ['sending-performance', 'await-performance-user', 'wait-performance'].includes(stage) ? 3
-            : ['sending-continuation', 'await-continuation-user'].includes(stage) ? continuationStep
-              : rawStage === 'complete' ? 4
-                : 0;
-
-      for (const step of progress.querySelectorAll('.acb-auto-step')) {
-        const number = Number(step.dataset.step);
-        step.dataset.state = activeStep === 4 || (activeStep > 0 && number < activeStep)
-          ? 'done'
-          : number === activeStep
-            ? 'active'
+    if (saveNow) {
+      const stats = currentBridgeSaveState();
+      const records = auditRecordsSnapshot;
+      const readyCount = records.length;
+      const durableCount = records.filter(record => Number(record.bridgeSavedAt) > 0).length;
+      saveNow.textContent = stats.failed > 0
+        ? 'SAVE !'
+        : stats.pending > 0
+          ? 'SAVE'
+          : readyCount > 0 && durableCount === readyCount
+            ? 'SAVED'
+            : 'SAVE';
+      saveNow.dataset.state = stats.failed > 0
+        ? 'error'
+        : stats.pending > 0
+          ? 'pending'
+          : readyCount > 0 && durableCount === readyCount
+            ? 'saved'
             : 'idle';
+      saveNow.title = readyCount
+        ? `SYNC/SAVE current chat: persist runtime, rescan visible COMPLETE waves, physically recreate/overwrite all ${readyCount} cached wave file(s), and rebuild ALL_3 when 3/3 exist. ${durableCount}/${readyCount} currently durable.`
+        : 'SYNC/SAVE current chat: persist/refresh runtime state now. No structurally COMPLETE wave is cached yet.';
+    }
+
+    const progressSnapshot = autoProgressSnapshot();
+    renderProgressContainer(progress, progressSnapshot);
+    renderProgressContainer(superProgress, progressSnapshot);
+
+    if (superStatus) {
+      if (state.superCompact && autoRuntime?.stage === 'idle') {
+        miniAttachmentSignature = composerAttachmentSignature();
+      }
+
+      const compactLabel = superCompactAutoLabel(bridgeJobsSnapshot, auditRecordsSnapshot);
+      const start = miniStartAuditState();
+      const showStart = start.available;
+      const showStartBusy = start.busy;
+
+      const activeSaveFeedback = manualAuditSyncFeedbackUntil > Date.now()
+        ? manualAuditSyncFeedback
+        : '';
+
+      const visibleLabel = showStart
+        ? 'START'
+        : showStartBusy
+          ? 'START...'
+          : manualAuditSyncInFlight
+            ? 'SAVE...'
+            : activeSaveFeedback || compactLabel;
+
+      superStatus.textContent = visibleLabel;
+      superStatus.dataset.kind = summary.kind;
+      superStatus.dataset.phase = autoVisualPhase();
+      superStatus.dataset.hold = autoComposerHoldReason ? 'true' : 'false';
+      superStatus.dataset.action = showStart
+        ? 'start-audit'
+        : 'sync-save';
+
+      superStatus.dataset.state = showStart || showStartBusy ? 'start'
+        : activeSaveFeedback === 'SAVED' ? 'done'
+          : activeSaveFeedback === 'SAVE!' ? 'attention'
+            : activeSaveFeedback === 'QUEUE' ? 'recover'
+              : compactLabel === 'DONE' ? 'done'
+                : compactLabel === 'PAUSE' || compactLabel === '!' ? 'attention'
+                  : compactLabel === 'SAVE' ? 'recover'
+                    : ['REC', 'PART', 'VIRT', 'HOLD', 'AUTH'].includes(compactLabel) ? 'recover'
+                      : compactLabel === 'STBY' ? 'standby'
+                        : ['CORE', 'W2', 'PERF', 'AUTO'].includes(compactLabel) ? 'running'
+                          : 'idle';
+
+      superStatus.disabled = showStartBusy || manualAuditSyncInFlight;
+
+      const bridgeSave = currentBridgeSaveState();
+      const saveNote = state?.bridgeEnabled
+        ? bridgeSave.failed > 0
+          ? ` ${bridgeSave.failed} disk-save job(s) require bridge/token/config attention; audit text remains cached.`
+          : bridgeSave.pending > 0
+            ? ` ${bridgeSave.pending} disk-save job(s) are queued for ACBBridge.`
+            : ''
+        : currentAuditSaveAttention(bridgeJobsSnapshot, auditRecordsSnapshot)
+          ? ' Completed audit is cached, but browser-folder saving needs attention.'
+          : '';
+
+      if (showStart) {
+        const names = start.attachment?.names?.slice(0, 3).join(', ') || 'attached project';
+        const extra = Number(start.attachment?.count || 0) > 3
+          ? ` +${start.attachment.count - 3} more`
+          : '';
+        superStatus.title = start.retryPrepared
+          ? 'START AUDITING · retry the already prepared canonical Core receipt. No second Core/receipt will be created.'
+          : `START AUDITING · send canonical Audit Core now using the attached project file(s): ${names}${extra}. Auto3 continues Core -> Second -> Performance.`;
+      } else if (showStartBusy) {
+        superStatus.title = 'START AUDITING is preparing/sending Audit Core. Duplicate clicks are blocked.';
+      } else {
+        const attachment = ['READY', 'CHAT'].includes(compactLabel) ? chatGPTReadyAttachmentSummary() : null;
+        const startHint = ['READY', 'CHAT'].includes(compactLabel) && attachment?.reason
+          ? ` ${attachment.reason}`
+          : '';
+
+        superStatus.title = `${summary.text}${autoRuntime?.projectName ? ` Project: ${autoRuntime.projectName}.` : ''}${saveNote}${startHint} Click to SYNC/SAVE this chat: persist current runtime state, rescan COMPLETE waves, physically recreate/overwrite every available audit file through ACBBridge, and rebuild ALL_3 when all three waves exist. In-progress assistant text is never mislabeled as COMPLETE.`;
       }
     }
+    renderAuditFolderState();
+    renderBridgeState(bridgeJobsSnapshot);
 
     const chatgpt = detectSite().key === 'chatgpt';
     if (delivery) delivery.disabled = !chatgpt;
@@ -3892,6 +9969,30 @@ function assistantTextCandidates(turn) {
 
   function pauseAutoAudit(reason, kind = 'warning') {
     if (!autoRuntime) autoRuntime = emptyAutoRuntime();
+
+    if (!pauseIsExplicitHumanStop(reason)) {
+      const tx = readCommittedAutoSend();
+      const receipt = String(tx?.receipt || autoRuntime.pendingSendReceipt || '');
+      const turn = exactReceiptUserTurn(receipt, getChatGPTTurns());
+      const expectedKind = String(tx?.kind || autoRuntime.pendingSendKind || autoRuntime.expectedKind || (turn ? classifyAuditTurn(turn) : ''));
+      if (turn || tx?.phase === 'clicked') {
+        const awaitStage = autoAwaitStageForKind(expectedKind, Boolean(tx?.continuation || autoRuntime.continuationKind));
+        if (awaitStage) {
+          autoRuntime.stage = awaitStage;
+          autoRuntime.expectedKind = expectedKind;
+          autoRuntime.pausedReason = '';
+          autoRuntime.pausedFromStage = '';
+          autoRuntime.waitStartedAt = Date.now();
+          saveAutoRuntime({ pauseOnFailure: false });
+          ensureAutoAuditObserver();
+          setStatus(turn ? `${waveLabel(expectedKind)} receipt is already visible. Stale transient PAUSE ignored; Auto3 resumed.` : `${waveLabel(expectedKind)} Send click is committed. Transient PAUSE ignored while ChatGPT registers the turn.`, 'success');
+          scheduleAutoAuditCheck(500);
+          return;
+        }
+      }
+    }
+
+    clearAutoComposerHold();
     clearAutoTimers();
     if (autoRuntime.stage !== 'paused') autoRuntime.pausedFromStage = autoRuntime.stage;
     autoRuntime.stage = 'paused';
@@ -3901,6 +10002,12 @@ function assistantTextCandidates(turn) {
     autoRuntime.stableSince = 0;
     ensureAutoAuditObserver();
     const persisted = saveAutoRuntime({ pauseOnFailure: false });
+    if (pauseIsExplicitHumanStop(reason)) {
+      // A deliberate pause has no automatic work to protect. Holding the lease
+      // forever would make Resume in another tab impossible while this tab stays
+      // open, so release ownership after persisting the shared paused state.
+      releaseAutoLease(autoBoundConversationKey);
+    }
     setStatus(
       persisted ? `Auto audit paused: ${reason}` : `Auto audit paused in memory but could not persist the pause: ${reason}`,
       persisted ? kind : 'error'
@@ -3908,32 +10015,94 @@ function assistantTextCandidates(turn) {
   }
 
   function resetAutoAuditRuntime(options = {}) {
+    clearAutoComposerHold();
     clearAutoTimers();
     bindAutoRuntimeToCurrentConversation({ claim: false });
 
-    const enabled = Boolean(autoRuntime?.enabled);
+    const previousRuntime = autoRuntime;
+    const enabled = Boolean(autoRuntime?.enabled && !autoRuntime?.storageCorrupt);
+    const conversationKey = autoBoundConversationKey || currentConversationKey();
     const turns = getChatGPTTurns();
     const latestUser = latestChatGPTUserTurn(turns);
     const latestAssistant = latestUser ? assistantTurnAfter(latestUser, turns) : null;
 
-    autoRuntime = emptyAutoRuntime({ enabled });
-    autoRuntime.conversationKey = autoBoundConversationKey || currentConversationKey();
-    autoRuntime.seenUserId = getTurnId(latestUser);
-    autoRuntime.baselineAssistantKey = assistantFingerprint(latestAssistant);
-    ensureAutoAuditObserver();
-    if (!saveAutoRuntime()) return false;
+    const replacement = emptyAutoRuntime({ enabled });
+    replacement.conversationKey = conversationKey;
+    replacement.seenUserId = getTurnId(latestUser);
+    replacement.baselineAssistantKey = assistantFingerprint(latestAssistant);
+    replacement.resetBarrierActive = true;
+    replacement.resetBarrierUserId = getTurnId(latestUser);
 
+    // Durable reset barrier first. Session checkpoints and A3 intent stay intact
+    // until this verified write succeeds, so a failed Reset cannot half-destroy
+    // the previous recoverable chain.
+    if (!persistRuntimeForKey(conversationKey, replacement)) {
+      autoRuntime = previousRuntime;
+      setStatus('Reset failed before the durable barrier committed. Previous START/send/runtime checkpoints were preserved.', 'error');
+      renderAutoAuditState();
+      return false;
+    }
+
+    autoRuntimeCorruptKey = '';
+    autoRuntime = replacement;
+    clearStartAuditHandoff();
+    clearCommittedAutoSend();
+    if (enabled) writeA3Intent(true, conversationKey, { startTransaction: false });
+    else clearA3Intent();
+    ensureAutoAuditObserver();
+
+    const physicallyCleared = clearAuditResultsForConversation(conversationKey);
     if (enabled) claimAutoLease();
+    renderAutoAuditState();
 
     if (!options.silent) {
-      setStatus('Reset only this conversation\'s Auto3 chain. Other ChatGPT conversations were not changed.', 'success');
+      setStatus(
+        physicallyCleared
+          ? 'Reset this conversation\'s Auto3 chain and cached audit lineage. Waiting for a fresh Core/START.'
+          : 'Reset barrier committed. Some old cache keys could not be physically deleted, but the barrier logically fences them and they will not be shown/saved/adopted.',
+        physicallyCleared ? 'success' : 'warning'
+      );
     }
+    return true;
   }
 
   function stageTimedOut() {
     if (!autoRuntime?.waitStartedAt) return false;
     const maxMs = state.autoAuditTimeoutMin * 60 * 1000;
     return Date.now() - autoRuntime.waitStartedAt > maxMs;
+  }
+
+  function reconcileExecutionGap(now = Date.now()) {
+    const current = Math.max(0, Number(now) || Date.now());
+    const previous = Math.max(0, Number(autoLastEvaluationAt) || 0);
+    autoLastEvaluationAt = current;
+
+    if (!previous || current <= previous) return false;
+    const gap = current - previous;
+    if (gap <= AUTO_EXECUTION_GAP_RESET_MS || !autoRuntime?.enabled) return false;
+    if (autoRuntime.stage === 'paused' || autoRuntime.stage === 'complete') return false;
+
+    // A long JavaScript execution gap means the renderer was likely frozen,
+    // background-throttled, BFCache-suspended, or the machine/display session
+    // stopped scheduling this page. Wall-clock silence during that gap is not
+    // evidence that the assistant stalled. Restart every DOM-stability/liveness
+    // grace window and shift absolute wait clocks so wake-up cannot instantly
+    // emit a stale CONTINUE or timeout before queued DOM/network work hydrates.
+    const shiftClock = value => {
+      const parsed = Math.max(0, Number(value) || 0);
+      return parsed ? Math.min(current, parsed + gap) : 0;
+    };
+
+    autoRuntime.waitStartedAt = shiftClock(autoRuntime.waitStartedAt);
+    autoRuntime.pendingSendStartedAt = shiftClock(autoRuntime.pendingSendStartedAt);
+    autoRuntime.idleStallKey = '';
+    autoRuntime.idleStallSince = 0;
+    autoRuntime.stableResponseKey = '';
+    autoRuntime.stableSince = 0;
+    autoRuntime.anchorMissingSince = 0;
+
+    saveAutoRuntime({ pauseOnFailure: false });
+    return true;
   }
 
   function ensureAutoConversation(turns) {
@@ -3943,10 +10112,18 @@ function assistantTextCandidates(turn) {
       return false;
     }
 
+    if (autoRuntime.stage === 'paused' && pauseIsExplicitHumanStop(autoRuntime.pausedReason)) {
+      releaseAutoLease(autoBoundConversationKey);
+      renderAutoAuditState();
+      return true;
+    }
+
+    const ownedBeforeClaim = autoLeaseOwnedByThisTab(autoBoundConversationKey);
     if (claimAutoLease()) {
-      // Ownership was just (re)acquired. Adopt the latest persisted runtime so
-      // a standby tab that was promoted never starts from a stale in-memory
-      // snapshot of the previous owner's chain.
+      // Ownership was just (re)acquired. Adopt the latest persisted runtime and
+      // invalidate full-text result cache so a standby/frozen tab cannot resume
+      // from values written before the previous owner completed more work.
+      if (!ownedBeforeClaim) invalidateAuditResultCache(autoBoundConversationKey);
       refreshAutoRuntimeFromStorage();
       return true;
     }
@@ -4012,6 +10189,11 @@ function assistantTextCandidates(turn) {
   function armFromCoreTurn(userTurn, options = {}) {
     if (!userTurn || classifyAuditTurn(userTurn) !== 'core') return false;
 
+    // A CORE CONTINUE is same-wave recovery evidence, never a fresh audit root.
+    // Treating it as a new Core after reload/COMPLETE resets runId/cache/project
+    // and can restart the entire 3-wave chain from a stale recovery message.
+    if (auditTurnIsContinuation(userTurn)) return false;
+
     const turns = getChatGPTTurns();
     const assistant = assistantTurnAfter(userTurn, turns);
     const finalAlready = assistant && !chatGPTIsGenerating() && assistantHasFinalActions(assistant);
@@ -4019,6 +10201,33 @@ function assistantTextCandidates(turn) {
     if (finalAlready && !options.allowCompleted) return false;
 
     clearAutoTimers();
+
+    // START already resolved the project from the composer attachment before Send.
+    // The authored Core turn can hydrate in pieces: its text/receipt may exist before
+    // attachment tiles expose their filenames. Never erase the authoritative START
+    // snapshot merely because projectNameFromCoreTurn() is temporarily empty.
+    const pendingStart = readStartAuditHandoff();
+    const startReceiptMatches = Boolean(
+      pendingStart?.receipt && userTurnContainsReceipt(userTurn, pendingStart.receipt)
+    );
+    const inferredProjectName = sanitizeProjectIdentity(projectNameFromCoreTurn(userTurn));
+    const startProjectName = startReceiptMatches
+      ? sanitizeProjectIdentity(pendingStart?.runtime?.projectName || '')
+      : '';
+    const selectedProjectName = inferredProjectName || startProjectName;
+    const selectedProjectSource = inferredProjectName
+      ? 'artifact'
+      : startProjectName
+        ? String(pendingStart?.runtime?.projectNameSource || 'artifact')
+        : '';
+
+    autoRuntime.projectName = selectedProjectName;
+    autoRuntime.projectNameSource = selectedProjectSource;
+    autoRuntime.renameAppliedName = '';
+    autoRuntime.renamePersistedName = '';
+    autoRuntime.renamePersistedAt = 0;
+    autoRuntime.renameAttemptName = '';
+    autoRuntime.renameAttemptCount = 0;
     autoRuntime.stage = 'wait-core';
     autoRuntime.conversationKey = currentConversationKey();
     autoRuntime.anchorUserId = getTurnId(userTurn);
@@ -4026,14 +10235,35 @@ function assistantTextCandidates(turn) {
     autoRuntime.secondUserId = '';
     autoRuntime.performanceUserId = '';
     autoRuntime.expectedKind = '';
+    autoRuntime.runId = createAuditRunId();
     autoRuntime.startedAt = Date.now();
     autoRuntime.waitStartedAt = Date.now();
     autoRuntime.stableResponseKey = '';
     autoRuntime.stableSince = 0;
+    autoRuntime.stageAssistantId = '';
+    autoRuntime.anchorMissingSince = 0;
     autoRuntime.pausedReason = '';
+    autoRuntime.resetBarrierActive = false;
+    autoRuntime.resetBarrierUserId = '';
     if (!saveAutoRuntime()) return false;
 
-    setStatus('Auto audit armed from the latest AUDIT CORE turn. Waiting for Core to finish before sending Second Wave.', 'success');
+    // Only discard the previous run's cached handoffs after the new Core runtime
+    // checkpoint is durable. Storage failure must not destroy the last known-good
+    // audit evidence while also failing to arm the replacement run.
+    clearAuditResultsForConversation(currentConversationKey());
+
+    if (startHandoffIsCommitted(pendingStart)) clearStartAuditHandoff();
+
+    setStatus(`Auto audit armed from the latest AUDIT CORE turn${autoRuntime.projectName ? ` for ${autoRuntime.projectName}` : ''}. Waiting for Core to finish before sending Second Wave.`, 'success');
+    if (autoRuntime.projectName) {
+      const renameContext = {
+        source: 'artifact',
+        conversationKey: currentConversationKey(),
+        runStartedAt: autoRuntime.startedAt
+      };
+      maybeRenameConversation(autoRuntime.projectName, renameContext).catch(() => { });
+      scheduleConversationTitleGuard(autoRuntime.projectName, renameContext);
+    }
     scheduleAutoAuditCheck(250);
     return true;
   }
@@ -4044,9 +10274,7 @@ function assistantTextCandidates(turn) {
     for (let index = start - 1; index >= 0; index -= 1) {
       if (turnRole(turns[index]) !== 'user') continue;
       const kind = classifyAuditTurn(turns[index]);
-      // The nearest earlier user turn decides: a wanted-kind sibling is the
-      // answer, anything else (plain message or different audit command)
-      // interrupts the lineage. Never keep walking past an interruption.
+      if (!kind) continue; // supplemental user context is transparent to audit lineage
       return kind === wantedKind ? turns[index] : null;
     }
     return null;
@@ -4062,29 +10290,35 @@ function assistantTextCandidates(turn) {
           : '';
     if (!expected) return null;
 
-    const latestUser = latestChatGPTUserTurn(turns);
-    if (!latestUser || classifyAuditTurn(latestUser) !== expected) return null;
+    const latestUser = latestExpectedAuditUserTurn(expected, turns);
+    if (!latestUser) return null;
 
     const id = getTurnId(latestUser);
-    if (!id) return null;
-
-    if (expected === 'core') autoRuntime.coreUserId = id;
-    if (expected === 'second') autoRuntime.secondUserId = id;
-    if (expected === 'performance') autoRuntime.performanceUserId = id;
-    autoRuntime.anchorUserId = autoRuntime.anchorUserId || id;
-    autoRuntime.seenUserId = id;
-    autoRuntime.conversationKey = currentConversationKey();
-    if (!saveAutoRuntime()) return null;
+    if (id) {
+      if (expected === 'core') autoRuntime.coreUserId = id;
+      if (expected === 'second') autoRuntime.secondUserId = id;
+      if (expected === 'performance') autoRuntime.performanceUserId = id;
+      autoRuntime.anchorUserId = autoRuntime.anchorUserId || id;
+      autoRuntime.seenUserId = id;
+      autoRuntime.conversationKey = currentConversationKey();
+      autoRuntime.anchorMissingSince = 0;
+      if (!saveAutoRuntime()) return null;
+    } else {
+      autoRuntime.anchorMissingSince = 0;
+    }
     return latestUser;
   }
 
   function adoptCurrentAuditTurn() {
     const turns = getChatGPTTurns();
-    const latestUser = latestChatGPTUserTurn(turns);
+    const lineage = visibleAuditLineage(turns);
+    const latestUser = lineage.blockedByReset
+      ? null
+      : (lineage.performance || lineage.second || lineage.core);
     const kind = classifyAuditTurn(latestUser);
 
     if (!latestUser || !kind) {
-      setStatus('Adopt failed: the latest user turn is not a recognizable AUDIT CORE / SECOND WAVE / PERFORMANCE command.', 'warning');
+      setStatus('Adopt failed: no recognizable AUDIT CORE / SECOND WAVE / PERFORMANCE command is available in the current conversation.', 'warning');
       return false;
     }
 
@@ -4100,6 +10334,142 @@ function assistantTextCandidates(turn) {
       );
     }
     return resumed;
+  }
+
+  function readCommittedAutoSend() {
+    try {
+      const raw = sessionStorage.getItem(AUTO_COMMITTED_SEND_SESSION_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || parsed.version !== 1 || parsed.tabId !== autoTabId) return null;
+      if (!Number(parsed.expiresAt) || parsed.expiresAt <= Date.now()) {
+        sessionStorage.removeItem(AUTO_COMMITTED_SEND_SESSION_KEY);
+        return null;
+      }
+      return parsed;
+    } catch (_) { return null; }
+  }
+
+  function writeCommittedAutoSend(tx) {
+    if (!tx) return false;
+    try { sessionStorage.setItem(AUTO_COMMITTED_SEND_SESSION_KEY, JSON.stringify(tx)); return true; }
+    catch (_) { return false; }
+  }
+
+  function clearCommittedAutoSend(expectedReceipt = '') {
+    const current = readCommittedAutoSend();
+    if (expectedReceipt && current?.receipt && current.receipt !== expectedReceipt) return;
+    try { sessionStorage.removeItem(AUTO_COMMITTED_SEND_SESSION_KEY); } catch (_) { }
+  }
+
+  function autoAwaitStageForKind(kind, continuation = false) {
+    if (continuation) return 'await-continuation-user';
+    if (kind === 'second') return 'await-second-user';
+    if (kind === 'performance') return 'await-performance-user';
+    return '';
+  }
+
+  function beginCommittedAutoSend(kind, receipt, options = {}) {
+    if (!kind || !receipt) return null;
+    const now = Date.now();
+    const tx = {
+      version: 1, tabId: autoTabId,
+      conversationKey: autoBoundConversationKey || currentConversationKey(),
+      runId: String(autoRuntime?.runId || ''),
+      kind, receipt,
+      continuation: Boolean(options.continuation),
+      previousUserId: String(options.previousUserId || ''),
+      phase: 'prepared', preparedAt: now, clickedAt: 0,
+      expiresAt: now + AUTO_COMMITTED_SEND_TTL_MS
+    };
+    writeCommittedAutoSend(tx);
+    return tx;
+  }
+
+  function markCommittedAutoSendClicked(kind, receipt, options = {}) {
+    const current = readCommittedAutoSend();
+    const now = Date.now();
+    const tx = current && current.receipt === receipt ? current : beginCommittedAutoSend(kind, receipt, options);
+    if (!tx) return null;
+    tx.phase = 'clicked';
+    tx.clickedAt = now;
+    tx.expiresAt = now + AUTO_COMMITTED_SEND_TTL_MS;
+    tx.conversationKey = autoBoundConversationKey || currentConversationKey();
+    tx.runId = String(autoRuntime?.runId || tx.runId || '');
+    writeCommittedAutoSend(tx);
+    return tx;
+  }
+
+  function exactReceiptUserTurn(receipt, turns = getChatGPTTurns()) {
+    if (!receipt) return null;
+    for (let i = turns.length - 1; i >= 0; i -= 1) if (userTurnContainsReceipt(turns[i], receipt)) return turns[i];
+    return null;
+  }
+
+  function pauseIsExplicitHumanStop(reason = '') {
+    return /Paused manually from the widget|reported BLOCKED|hard audit precondition failure/i.test(String(reason || ''));
+  }
+
+  function recoverCommittedSendFromDom(turns = getChatGPTTurns()) {
+    if (!autoRuntime?.enabled) return false;
+    const tx = readCommittedAutoSend();
+    const receipt = String(tx?.receipt || autoRuntime.pendingSendReceipt || '');
+    const turn = exactReceiptUserTurn(receipt, turns);
+    const kind = String(tx?.kind || autoRuntime.pendingSendKind || autoRuntime.expectedKind || autoRuntime.continuationKind || (turn ? classifyAuditTurn(turn) : ''));
+
+    if (turn && kind && classifyAuditTurn(turn) === kind) {
+      const id = getTurnId(turn);
+      if (!id) {
+        autoRuntime.stage = autoAwaitStageForKind(kind, Boolean(tx?.continuation || autoRuntime.continuationKind)) || autoRuntime.stage;
+        autoRuntime.expectedKind = kind;
+        autoRuntime.pausedReason = '';
+        autoRuntime.pausedFromStage = '';
+        saveAutoRuntime({ pauseOnFailure: false });
+        setStatus(`${waveLabel(kind)} Send receipt is already visible. Waiting only for turn-id hydration; no Resume and no duplicate Send.`, 'success');
+        scheduleAutoAuditCheck(700);
+        return true;
+      }
+      setWaveUserId(kind, id);
+      autoRuntime.seenUserId = id;
+      autoRuntime.stage = waveWaitStage(kind);
+      autoRuntime.expectedKind = '';
+      autoRuntime.continuationKind = '';
+      autoRuntime.continuationReason = '';
+      autoRuntime.continuationPreviousUserId = '';
+      autoRuntime.pausedReason = '';
+      autoRuntime.pausedFromStage = '';
+      autoRuntime.waitStartedAt = Date.now();
+      autoRuntime.stableResponseKey = '';
+      autoRuntime.stableSince = 0;
+      autoRuntime.stageAssistantId = '';
+      autoRuntime.anchorMissingSince = 0;
+      autoRuntime.idleStallKey = '';
+      autoRuntime.idleStallSince = 0;
+      clearPendingSendReceipt({ save: false });
+      clearCommittedAutoSend(receipt);
+      saveAutoRuntime({ pauseOnFailure: false });
+      setStatus(`${waveLabel(kind)} committed Send recovered from exact receipt. Auto3 resumed automatically.`, 'success');
+      scheduleAutoAuditCheck(350);
+      return true;
+    }
+
+    if (tx?.phase === 'clicked' && autoRuntime.stage === 'paused' && !pauseIsExplicitHumanStop(autoRuntime.pausedReason)) {
+      autoRuntime.stage = autoAwaitStageForKind(tx.kind, tx.continuation);
+      autoRuntime.expectedKind = tx.kind;
+      autoRuntime.pendingSendReceipt = tx.receipt;
+      autoRuntime.pendingSendKind = tx.kind;
+      autoRuntime.pendingSendPreviousUserId = autoRuntime.pendingSendPreviousUserId || tx.previousUserId || '';
+      autoRuntime.pendingSendClickArmed = true;
+      autoRuntime.pendingSendStartedAt = Number(tx.clickedAt) || Date.now();
+      autoRuntime.waitStartedAt = Date.now();
+      autoRuntime.pausedReason = '';
+      autoRuntime.pausedFromStage = '';
+      saveAutoRuntime({ pauseOnFailure: false });
+      setStatus(`${waveLabel(tx.kind)} Send was already clicked. Transient PAUSE absorbed; waiting for ChatGPT registration without resending.`, 'success');
+      scheduleAutoAuditCheck(700);
+      return true;
+    }
+    return false;
   }
 
   function createAutoSendReceipt(kind) {
@@ -4150,40 +10520,37 @@ function assistantTextCandidates(turn) {
     const receipt = String(autoRuntime?.pendingSendReceipt || '');
     const previousId = String(
       autoRuntime?.pendingSendPreviousUserId ||
-      (expectedKind === 'second'
-        ? autoRuntime?.coreUserId
-        : expectedKind === 'performance'
-          ? autoRuntime?.secondUserId
-          : autoRuntime?.continuationPreviousUserId) ||
-      ''
+      (expectedKind === 'second' ? autoRuntime?.coreUserId : expectedKind === 'performance' ? autoRuntime?.secondUserId : autoRuntime?.continuationPreviousUserId) || ''
     );
 
     if (receipt) {
       for (let index = turns.length - 1; index >= 0; index -= 1) {
         if (userTurnContainsReceipt(turns[index], receipt)) return turns[index];
       }
+      return null;
     }
 
     const previous = previousId ? findTurnById(previousId, turns) : null;
     const previousIndex = previous ? turns.indexOf(previous) : -1;
+    if (previousId && previousIndex < 0) return null; // virtualized legacy anchor is ambiguous: fail closed.
 
     if (previousIndex >= 0) {
-      for (let index = turns.length - 1; index > previousIndex; index -= 1) {
+      let matched = null;
+      for (let index = previousIndex + 1; index < turns.length; index += 1) {
         const candidate = turns[index];
         if (turnRole(candidate) !== 'user') continue;
-        if (classifyAuditTurn(candidate) === expectedKind) return candidate;
+        const kind = classifyAuditTurn(candidate);
+        if (kind === 'core' && !auditTurnIsContinuation(candidate)) break;
+        if (kind === expectedKind) matched = candidate;
       }
+      return matched;
     }
 
-    // Virtualization fallback when the previous anchor itself is not mounted.
-    for (let index = turns.length - 1; index >= 0; index -= 1) {
-      const candidate = turns[index];
-      if (turnRole(candidate) !== 'user') continue;
-      if (classifyAuditTurn(candidate) !== expectedKind) continue;
-      const id = getTurnId(candidate);
-      if (!previousId || !id || id !== previousId) return candidate;
-    }
-
+    const lineage = visibleAuditLineage(turns);
+    if (lineage.blockedByReset) return null;
+    if (expectedKind === 'core') return lineage.core;
+    if (expectedKind === 'second') return lineage.second;
+    if (expectedKind === 'performance') return lineage.performance;
     return null;
   }
 
@@ -4192,9 +10559,15 @@ function assistantTextCandidates(turn) {
     const id = getTurnId(turn);
 
     if (!id) {
-      // Visible message with late hydration is proof enough not to resend.
+      if (autoRuntime.stage === 'paused' && !pauseIsExplicitHumanStop(autoRuntime.pausedReason)) {
+        const tx = readCommittedAutoSend();
+        autoRuntime.stage = autoAwaitStageForKind(expectedKind, Boolean(tx?.continuation || autoRuntime.continuationKind)) || autoRuntime.stage;
+        autoRuntime.pausedReason = '';
+        autoRuntime.pausedFromStage = '';
+        saveAutoRuntime({ pauseOnFailure: false });
+      }
       setStatus(
-        `${waveLabel(expectedKind)} Send is visibly present, but ChatGPT has not hydrated a stable turn id yet. Waiting; no duplicate will be sent.`,
+        `${waveLabel(expectedKind)} Send is visibly present, but ChatGPT has not hydrated a stable turn id yet. Waiting; no duplicate and no human Resume.`,
         'info'
       );
       scheduleAutoAuditCheck(AUTO_LIVENESS_CHECK_MS);
@@ -4211,10 +10584,18 @@ function assistantTextCandidates(turn) {
     autoRuntime.waitStartedAt = Date.now();
     autoRuntime.stableResponseKey = '';
     autoRuntime.stableSince = 0;
+    autoRuntime.stageAssistantId = '';
+    autoRuntime.anchorMissingSince = 0;
     autoRuntime.idleStallKey = '';
     autoRuntime.idleStallSince = 0;
+    const committedReceipt = String(autoRuntime.pendingSendReceipt || '');
     clearPendingSendReceipt({ save: false });
-    if (!saveAutoRuntime()) return false;
+    clearCommittedAutoSend(committedReceipt);
+    if (!saveAutoRuntime({ pauseOnFailure: false })) {
+      setStatus(`${waveLabel(expectedKind)} turn registered; runtime storage is temporarily unavailable, but the visible turn will be re-adopted automatically.`, 'warning');
+      scheduleAutoAuditCheck(1200);
+      return true;
+    }
 
     setStatus(`${waveLabel(expectedKind)} user turn registered. Waiting for its assistant result.`, 'success');
     scheduleAutoAuditCheck(500);
@@ -4238,44 +10619,209 @@ function assistantTextCandidates(turn) {
     return Boolean(send && !send.disabled && send.getAttribute('aria-disabled') !== 'true');
   }
 
-  function scheduleRegistrationRecovery(expectedKind, resendStage) {
+  async function retryPendingComposerSendClick(expectedKind) {
+    if (!autoRuntime?.enabled || !expectedKind) return 'not-applicable';
+    const receipt = String(autoRuntime.pendingSendReceipt || '');
+    if (!receipt) return 'not-applicable';
+    if (chatGPTComposerReceiptState(receipt) !== 'present-with-receipt') return 'not-prepared';
+
+    const retries = Math.max(0, Number(autoRuntime.pendingSendRetries) || 0);
+    if (retries >= AUTO_MAX_SEND_REGISTRATION_RETRIES) return 'retry-exhausted';
+    const token = await verifyAutoLeaseForSend();
+    if (!token) { scheduleAutoAuditCheck(900); return 'ownership-lost'; }
+    const site = detectSite();
+    const send = cachedSiteElement(site, 'send');
+    if (!send || send.disabled || send.getAttribute('aria-disabled') === 'true') {
+      scheduleAutoAuditCheck(900);
+      return 'send-not-ready';
+    }
+
+    const continuation = Boolean(autoRuntime.continuationKind || autoRuntime.stage === 'await-continuation-user');
+    const awaitStage = autoAwaitStageForKind(expectedKind, continuation);
+    if (!awaitStage) return 'not-applicable';
+    const initial = chatGPTComposerStateSnapshot();
+    if (!initial) return 'not-prepared';
+    const ownership = createAutoSendOwnershipGuard(token, initial);
+    ownership.captureWrite();
+
+    autoRuntime.pendingSendRetries = retries + 1;
+    autoRuntime.pendingSendStartedAt = Date.now();
+    autoRuntime.pendingSendClickArmed = true;
+    autoRuntime.stage = awaitStage;
+    autoRuntime.expectedKind = expectedKind;
+    if (!autoRuntime.waitStartedAt) autoRuntime.waitStartedAt = Date.now();
+    if (!saveAutoRuntime({ pauseOnFailure: true })) return 'persistence-failed';
+    if (!(await ownership.verify())) return 'ownership-lost';
+
+    beginCommittedAutoSend(expectedKind, receipt, { continuation, previousUserId: autoRuntime.pendingSendPreviousUserId });
+    const accepted = await clickChatGPTSendVerified(send, rawChatGPTComposerInput(), { receipt, autoOwnership: ownership });
+    if (!accepted) {
+      setStatus(`${waveLabel(expectedKind)} receipt is still prepared after click recovery. No duplicate text was inserted; bounded registration recovery remains active.`, 'warning');
+      scheduleAutoAuditCheck(900);
+      return 'still-prepared';
+    }
+    markCommittedAutoSendClicked(expectedKind, receipt, { continuation, previousUserId: autoRuntime.pendingSendPreviousUserId });
+    setStatus(`${waveLabel(expectedKind)} pending receipt was submitted on click-only recovery (${autoRuntime.pendingSendRetries}/${AUTO_MAX_SEND_REGISTRATION_RETRIES}).`, 'warning');
+    scheduleAutoAuditCheck(700);
+    return 'accepted';
+  }
+
+  function scheduleRegistrationRecovery(expectedKind) {
     if (!autoRuntime) return;
+    const origin = Number(autoRuntime.waitStartedAt) || Number(autoRuntime.pendingSendStartedAt) || Date.now();
+    const totalElapsed = Date.now() - origin;
+    const receipt = String(autoRuntime.pendingSendReceipt || '');
+    const receiptState = receipt ? chatGPTComposerReceiptState(receipt) : 'no-receipt';
 
-    const elapsed = Date.now() - (
-      Number(autoRuntime.pendingSendStartedAt) ||
-      Number(autoRuntime.waitStartedAt) ||
-      Date.now()
-    );
+    if (totalElapsed >= AUTO_SEND_REGISTER_HARD_TIMEOUT_MS) {
+      const priorStage = autoRuntime.stage;
+      clearCommittedAutoSend(receipt);
+      autoRuntime.stage = 'paused';
+      autoRuntime.pausedFromStage = priorStage;
+      autoRuntime.pausedReason = `Send registration remained ambiguous for ${Math.round(AUTO_SEND_REGISTER_HARD_TIMEOUT_MS / 1000)} seconds. The exact receipt was neither safely registered nor provably resolved; automatic re-send is stopped to prevent duplication.`;
+      autoRuntime.waitStartedAt = 0;
+      saveAutoRuntime({ pauseOnFailure: false });
+      setStatus(`${waveLabel(expectedKind)} send registration reached its bounded safety horizon. Auto3 failed closed instead of waiting or clicking forever.`, 'warning');
+      return;
+    }
 
-    // A verified Send click is irreversible and DOM absence is not evidence that it
-    // failed. Retry only when the exact receipt is still sitting in the canonical
-    // composer, which is positive local evidence that submission never left.
-    if (
-      elapsed >= AUTO_SEND_REGISTER_RETRY_MS &&
-      !chatGPTIsGenerating() &&
-      composerContainsPendingReceipt(autoRuntime.pendingSendReceipt)
-    ) {
-      const retries = Math.max(0, Number(autoRuntime.pendingSendRetries) || 0);
-      if (retries < AUTO_MAX_SEND_REGISTRATION_RETRIES) {
-        autoRuntime.pendingSendRetries = retries + 1;
-        autoRuntime.pendingSendStartedAt = Date.now();
-        autoRuntime.stage = resendStage;
-        autoRuntime.waitStartedAt = Date.now();
-        if (!saveAutoRuntime()) return;
-        setStatus(
-          `${waveLabel(expectedKind)} receipt is still present in the composer, so the previous click did not leave the editor. Retrying Send (${autoRuntime.pendingSendRetries}/${AUTO_MAX_SEND_REGISTRATION_RETRIES}).`,
-          'warning'
-        );
-        scheduleAutoAuditCheck(0);
-        return;
-      }
+    const retryElapsed = Date.now() - (Number(autoRuntime.pendingSendStartedAt) || origin);
+    if (retryElapsed >= AUTO_SEND_REGISTER_RETRY_MS && !chatGPTIsGenerating() && receiptState === 'present-with-receipt') {
+      retryPendingComposerSendClick(expectedKind).then(result => {
+        if (result === 'retry-exhausted') {
+          setStatus(`${waveLabel(expectedKind)} normal click-retry budget is exhausted. The same receipt remains under bounded observation; no duplicate command will be inserted.`, 'warning');
+        }
+        scheduleAutoAuditCheck(AUTO_LIVENESS_CHECK_MS);
+      }).catch(error => {
+        setStatus(`${waveLabel(expectedKind)} click-only Send recovery failed: ${error?.message || 'unexpected retry error'}. Pending receipt preserved.`, 'warning');
+        scheduleAutoAuditCheck(AUTO_LIVENESS_CHECK_MS);
+      });
+      return;
     }
 
     setStatus(
-      `${waveLabel(expectedKind)} Send was clicked and is awaiting ChatGPT DOM registration. Auto3 will not re-send without positive composer evidence; it keeps watching for the receipt-bearing turn.`,
+      receiptState === 'composer-unavailable'
+        ? `${waveLabel(expectedKind)} Send registration is temporarily unobservable because the composer is hydrating. This is not treated as success; the receipt remains under bounded recovery.`
+        : `${waveLabel(expectedKind)} Send is awaiting receipt-bearing turn registration. Auto3 will not re-send without positive prepared-composer evidence.`,
       'info'
     );
     scheduleAutoAuditCheck(AUTO_LIVENESS_CHECK_MS);
+  }
+
+  function clearAutoComposerHold() {
+    if (autoComposerHoldTimer) {
+      clearTimeout(autoComposerHoldTimer);
+      autoComposerHoldTimer = 0;
+    }
+    autoComposerHoldReason = '';
+    autoComposerHoldSince = 0;
+    autoComposerHoldAttempts = 0;
+  }
+
+  function composerReadinessIsSoftHold(reason = '') {
+    return /still generating|composer is not available|manual draft|pending manual attachment|account\/authentication interstitial|logged-out\/account surface/i.test(String(reason || ''));
+  }
+
+  function autoComposerHoldKind() {
+    if (!autoRuntime) return '';
+    if (autoRuntime.stage === 'sending-second') return 'second';
+    if (autoRuntime.stage === 'sending-performance') return 'performance';
+    if (autoRuntime.stage === 'sending-continuation') return String(autoRuntime.continuationKind || '');
+    return '';
+  }
+
+  function autoComposerHoldApplicable() {
+    return Boolean(
+      autoComposerHoldReason &&
+      autoRuntime?.enabled &&
+      ['sending-second', 'sending-performance', 'sending-continuation'].includes(autoRuntime.stage)
+    );
+  }
+
+  function scheduleAutoComposerHoldProbe(kind = autoComposerHoldKind(), options = {}) {
+    if (!autoComposerHoldApplicable()) return false;
+
+    if (autoComposerHoldTimer) {
+      if (!options.force) return true;
+      clearTimeout(autoComposerHoldTimer);
+      autoComposerHoldTimer = 0;
+    }
+
+    const index = Math.max(0, autoComposerHoldAttempts - 1);
+    const fallbackDelay = index < AUTO_COMPOSER_HOLD_FAST_DELAYS_MS.length
+      ? AUTO_COMPOSER_HOLD_FAST_DELAYS_MS[index]
+      : AUTO_COMPOSER_HOLD_SAFETY_MS;
+    const delay = Math.max(80, Number(options.delay ?? fallbackDelay));
+
+    autoComposerHoldTimer = setTimeout(() => {
+      autoComposerHoldTimer = 0;
+      bindAutoRuntimeToCurrentConversation({ claim: false });
+
+      if (!autoComposerHoldApplicable()) {
+        clearAutoComposerHold();
+        renderAutoAuditState();
+        return;
+      }
+
+      const ready = chatGPTComposerReadyForAutoSend();
+
+      if (ready.ok) {
+        const recoveredKind = kind || autoComposerHoldKind();
+        clearAutoComposerHold();
+        setStatus(
+          `${waveLabel(recoveredKind)} HOLD cleared automatically: the ChatGPT composer is ready again. Continuing Auto3 without toggling A3.`,
+          'success'
+        );
+        renderAutoAuditState();
+        scheduleAutoAuditCheck(0);
+        return;
+      }
+
+      if (!composerReadinessIsSoftHold(ready.reason)) {
+        clearAutoComposerHold();
+        renderAutoAuditState();
+        scheduleAutoAuditCheck(0);
+        return;
+      }
+
+      const changed = autoComposerHoldReason !== ready.reason;
+      autoComposerHoldReason = ready.reason;
+      autoComposerHoldAttempts += 1;
+
+      if (changed) {
+        setStatus(
+          `${waveLabel(kind || autoComposerHoldKind())} auto-send HOLD changed: ${ready.reason} Auto3 is still self-monitoring.`,
+          'info'
+        );
+        renderAutoAuditState();
+      }
+
+      // Fast probes are bounded. Afterwards only one tiny 15s safety probe
+      // remains while HOLD exists. Real composer DOM changes wake this sooner.
+      scheduleAutoComposerHoldProbe(kind || autoComposerHoldKind());
+    }, delay);
+
+    return true;
+  }
+
+  function deferAutoSendForComposer(kind, reason) {
+    const normalized = String(reason || 'Composer is not ready.').trim();
+
+    if (autoComposerHoldReason !== normalized) {
+      autoComposerHoldReason = normalized;
+      autoComposerHoldSince = Date.now();
+      autoComposerHoldAttempts = 0;
+    }
+
+    autoComposerHoldAttempts += 1;
+
+    setStatus(
+      `${waveLabel(kind)} auto-send HOLD: ${normalized} Auto3 will detect recovery itself; no A3 toggle or Resume is required.`,
+      'info'
+    );
+    renderAutoAuditState();
+    scheduleAutoComposerHoldProbe(kind);
+    return false;
   }
 
   async function sendAutoAuditWave(kind) {
@@ -4296,17 +10842,14 @@ function assistantTextCandidates(turn) {
 
     const ready = chatGPTComposerReadyForAutoSend();
     if (!ready.ok) {
-      if (
-        ready.reason === 'ChatGPT is still generating.' ||
-        ready.reason === 'Main ChatGPT composer is not available.'
-      ) {
-        scheduleAutoAuditCheck(1000);
-        return false;
+      if (composerReadinessIsSoftHold(ready.reason)) {
+        return deferAutoSendForComposer(kind, ready.reason);
       }
       pauseAutoAudit(ready.reason);
       return false;
     }
 
+    clearAutoComposerHold();
     const ownership = createAutoSendOwnershipGuard(token, chatGPTComposerStateSnapshot());
 
     const previousUserId = kind === 'second'
@@ -4314,6 +10857,7 @@ function assistantTextCandidates(turn) {
       : autoRuntime.secondUserId;
     const receipt = ensurePendingSendReceipt(kind, previousUserId);
     if (!receipt || autoRuntime.stage === 'paused') return false;
+    beginCommittedAutoSend(kind, receipt, { continuation: false, previousUserId });
     const preset = {
       name: wave.name,
       text: wave.text,
@@ -4347,28 +10891,164 @@ function assistantTextCandidates(turn) {
     }
 
     if (!result?.sent) {
-      pauseAutoAudit(`Could not verify automatic sending of ${wave.name}. Nothing else will be sent until Reset/Adopt.`);
-      return false;
-    }
-
-    // The click already happened, but the token is re-verified before the
-    // follow-up state commit: a stale owner must never persist its snapshot.
-    if (!isLeaseTokenCurrent(token)) {
-      refreshAutoRuntimeFromStorage();
-      renderAutoAuditState();
+      clearCommittedAutoSend(receipt);
+      setStatus(`Automatic ${wave.name} Send was not positively verified. Auto3 kept the receipt checkpoint and will adopt the turn if it appears or retry only the Send click.`, 'warning');
       scheduleAutoAuditCheck(900);
       return false;
     }
 
+    markCommittedAutoSendClicked(kind, receipt, { continuation: false, previousUserId });
+
+    if (!isLeaseTokenCurrent(token)) {
+      setStatus(`${waveLabel(kind)} Send was clicked, then this tab lost the Auto3 lease. Receipt-based recovery will adopt the sent turn without duplication.`, 'info');
+      renderAutoAuditState();
+      scheduleAutoAuditCheck(900);
+      return true;
+    }
+
     autoRuntime.pendingSendStartedAt = Date.now();
     autoRuntime.pendingSendClickArmed = true;
-    if (!saveAutoRuntime({ pauseOnFailure: true })) return false;
+    // beforeSend already persisted await-stage + receipt before the irreversible click.
+    // Never add a post-click storage gate that can turn a successful Send into PAUSE.
     scheduleAutoAuditCheck(500);
     return true;
   }
 
+  function preemptSameWaveContinuationFromLiveResult(kind, options = {}) {
+    if (!autoRuntime || !kind) return false;
+
+    const turns = options.turns || getChatGPTTurns();
+    const previousId = String(
+      options.previousUserId ||
+      autoRuntime.continuationPreviousUserId ||
+      waveUserId(kind) ||
+      ''
+    );
+
+    let previous = previousId ? findTurnById(previousId, turns) : null;
+    if (!previous) {
+      const latestExpected = latestExpectedAuditUserTurn(kind, turns);
+      const latestId = getTurnId(latestExpected);
+      if (latestExpected && (!previousId || !latestId || latestId === previousId)) {
+        previous = latestExpected;
+      }
+    }
+    if (!previous) return false;
+
+    const flow = auditUserFlowAfter(previous, kind, turns);
+
+    if (flow.conflictingTurn) {
+      pauseAutoAudit(
+        `A different audit command (${waveLabel(flow.conflictingKind)}) appeared before the automatic ${waveLabel(kind)} continuation. Auto3 stopped to avoid crossing explicit audit lineages.`
+      );
+      return true;
+    }
+
+    // If the user/another automation instance already inserted the expected
+    // same-wave continuation, adopt it instead of ever creating a duplicate.
+    if (flow.expectedTurn) {
+      const id = getTurnId(flow.expectedTurn);
+      if (!id) {
+        setStatus(
+          `${waveLabel(kind)} continuation is already visible, but ChatGPT has not hydrated its stable turn id yet. Waiting; no duplicate continuation will be sent.`,
+          'info'
+        );
+        scheduleAutoAuditCheck(700);
+        return true;
+      }
+
+      setWaveUserId(kind, id);
+      autoRuntime.seenUserId = id;
+      autoRuntime.stage = waveWaitStage(kind);
+      autoRuntime.expectedKind = '';
+      autoRuntime.continuationKind = '';
+      autoRuntime.continuationReason = '';
+      autoRuntime.continuationPreviousUserId = '';
+      autoRuntime.waitStartedAt = Date.now();
+      autoRuntime.stableResponseKey = '';
+      autoRuntime.stableSince = 0;
+      autoRuntime.stageAssistantId = '';
+      autoRuntime.anchorMissingSince = 0;
+      autoRuntime.idleStallKey = '';
+      autoRuntime.idleStallSince = 0;
+      clearPendingSendReceipt({ save: false });
+      clearAutoComposerHold();
+      if (!saveAutoRuntime({ pauseOnFailure: false })) {
+        scheduleAutoAuditCheck(900);
+        return true;
+      }
+      setStatus(
+        `${waveLabel(kind)} continuation already exists in the conversation. Auto3 adopted that exact turn and canceled the queued duplicate send.`,
+        'success'
+      );
+      scheduleAutoAuditCheck(0);
+      return true;
+    }
+
+    // Do not inspect a moving response as terminal. Once generation is idle,
+    // however, a structurally COMPLETE/BLOCKED handoff outranks any previously
+    // queued stall nudge. PARTIAL intentionally falls through and continues.
+    if (chatGPTIsGenerating()) return false;
+
+    const assistant = auditAssistantAcrossSupplementals(previous, kind, turns) ||
+      assistantTurnAfter(previous, turns);
+    if (!assistant) return false;
+
+    const proof = responseGateFromAssistantTurn(waveWaitStage(kind), assistant);
+    if (proof.state === 'blocked') {
+      pauseAutoAudit(
+        `The existing ${waveLabel(kind)} response reported BLOCKED before the queued continuation was sent. The stale continuation was canceled.`
+      );
+      return true;
+    }
+
+    if (proof.state !== 'complete') return false;
+
+    // Re-enter the normal wait-stage consumer instead of duplicating advancement
+    // logic here. evaluateAutoAudit() will stabilize, cache/save the exact handoff,
+    // then advance Core -> Second -> Performance in canonical order.
+    autoRuntime.stage = waveWaitStage(kind);
+    autoRuntime.expectedKind = '';
+    autoRuntime.continuationKind = '';
+    autoRuntime.continuationReason = '';
+    autoRuntime.continuationPreviousUserId = '';
+    autoRuntime.waitStartedAt = Date.now();
+    autoRuntime.stableResponseKey = '';
+    autoRuntime.stableSince = 0;
+    autoRuntime.stageAssistantId = getTurnId(assistant) || '';
+    autoRuntime.anchorMissingSince = 0;
+    autoRuntime.idleStallKey = '';
+    autoRuntime.idleStallSince = 0;
+    clearPendingSendReceipt({ save: false });
+    clearCommittedAutoSend();
+    clearAutoComposerHold();
+
+    if (!saveAutoRuntime({ pauseOnFailure: false })) {
+      setStatus(
+        `${waveLabel(kind)} is already COMPLETE, but runtime persistence is temporarily unavailable. The stale continuation remains canceled and Auto3 will retry state reconciliation.`,
+        'warning'
+      );
+      scheduleAutoAuditCheck(900);
+      return true;
+    }
+
+    setStatus(
+      `${waveLabel(kind)} became structurally COMPLETE before a queued liveness continuation could send. Stale CONTINUE canceled; consuming COMPLETE and advancing in canonical wave order.`,
+      'success'
+    );
+    scheduleAutoAuditCheck(0);
+    return true;
+  }
+
+
   async function sendAutoAuditContinuation(kind) {
     if (!kind) return false;
+
+    // Final irreversible-send preflight. A tab can freeze for minutes/hours after
+    // queueing a stall nudge, then wake after the assistant has already produced
+    // a COMPLETE handoff. Never trust stale `sending-continuation` state blindly.
+    if (preemptSameWaveContinuationFromLiveResult(kind)) return true;
+
     const token = await verifyAutoLeaseForSend();
     if (!token) {
       refreshAutoRuntimeFromStorage();
@@ -4377,28 +11057,31 @@ function assistantTextCandidates(turn) {
       return false;
     }
 
+    // Lease acquisition is asynchronous. Re-check once more immediately after it
+    // so a terminal answer that landed during arbitration still preempts Send.
+    if (preemptSameWaveContinuationFromLiveResult(kind)) return true;
+
     const reason = String(autoRuntime.continuationReason || 'partial');
     const count = Math.max(
       1,
       Number(
         reason === 'stall'
           ? autoRuntime.stallNudges?.[kind]
-          : autoRuntime.partialContinuations?.[kind]
+          : reason === 'sidecar'
+            ? autoRuntime.sidecarRecoveries?.[kind]
+            : autoRuntime.partialContinuations?.[kind]
       ) || 1
     );
     const ready = chatGPTComposerReadyForAutoSend();
     if (!ready.ok) {
-      if (
-        ready.reason === 'ChatGPT is still generating.' ||
-        ready.reason === 'Main ChatGPT composer is not available.'
-      ) {
-        scheduleAutoAuditCheck(1000);
-        return false;
+      if (composerReadinessIsSoftHold(ready.reason)) {
+        return deferAutoSendForComposer(kind, ready.reason);
       }
       pauseAutoAudit(ready.reason);
       return false;
     }
 
+    clearAutoComposerHold();
     const ownership = createAutoSendOwnershipGuard(token, chatGPTComposerStateSnapshot());
 
     const receipt = ensurePendingSendReceipt(
@@ -4406,6 +11089,7 @@ function assistantTextCandidates(turn) {
       autoRuntime.continuationPreviousUserId || waveUserId(kind)
     );
     if (!receipt || autoRuntime.stage === 'paused') return false;
+    beginCommittedAutoSend(kind, receipt, { continuation: true, previousUserId: autoRuntime.continuationPreviousUserId || waveUserId(kind) });
     const preset = {
       name: `${waveLabel(kind)} Continue ${count}`,
       text: auditContinuationPrompt(kind, count, reason),
@@ -4440,20 +11124,23 @@ function assistantTextCandidates(turn) {
     }
 
     if (!result?.sent) {
-      pauseAutoAudit(`Could not verify automatic sending of the ${waveLabel(kind)} continuation. Chain stopped to prevent a duplicate continuation send.`);
-      return false;
-    }
-
-    if (!isLeaseTokenCurrent(token)) {
-      refreshAutoRuntimeFromStorage();
-      renderAutoAuditState();
+      clearCommittedAutoSend(receipt);
+      setStatus(`${waveLabel(kind)} continuation Send was not positively verified. Auto3 kept the receipt checkpoint and will adopt the turn if it appears or retry only the Send click.`, 'warning');
       scheduleAutoAuditCheck(900);
       return false;
     }
 
+    markCommittedAutoSendClicked(kind, receipt, { continuation: true, previousUserId: autoRuntime.continuationPreviousUserId || waveUserId(kind) });
+
+    if (!isLeaseTokenCurrent(token)) {
+      setStatus(`${waveLabel(kind)} continuation was clicked before this tab lost the lease. Receipt recovery prevents false PAUSE and duplicate continuation.`, 'info');
+      renderAutoAuditState();
+      scheduleAutoAuditCheck(900);
+      return true;
+    }
+
     autoRuntime.pendingSendStartedAt = Date.now();
     autoRuntime.pendingSendClickArmed = true;
-    if (!saveAutoRuntime({ pauseOnFailure: true })) return false;
     scheduleAutoAuditCheck(500);
     return true;
   }
@@ -4468,31 +11155,17 @@ function assistantTextCandidates(turn) {
       if (!autoRuntime?.enabled || autoRuntime.stage !== 'sending-continuation' || autoRuntime.continuationKind !== kind) return;
 
       const turns = getChatGPTTurns();
-      const previous = findTurnById(previousId, turns);
-      const manualUser = previous ? userTurnAfter(previous, turns) : null;
 
-      if (manualUser) {
-        const manualKind = classifyAuditTurn(manualUser);
-        if (manualKind !== kind) {
-          pauseAutoAudit('A manual user message appeared before the automatic same-wave continuation. Chain stopped to avoid attaching automation to unrelated context.');
-          return;
-        }
+      // A queued continuation is only an intention, never authority. Before Send,
+      // re-read the exact preceding audit turn. An existing same-wave command,
+      // BLOCKED, or structurally COMPLETE response always wins over the stale nudge.
+      if (preemptSameWaveContinuationFromLiveResult(kind, {
+        previousUserId: previousId,
+        turns
+      })) return;
 
-        const id = getTurnId(manualUser);
-        setWaveUserId(kind, id);
-        autoRuntime.seenUserId = id;
-        autoRuntime.stage = waveWaitStage(kind);
-        autoRuntime.expectedKind = '';
-        autoRuntime.continuationKind = '';
-        autoRuntime.continuationPreviousUserId = '';
-        autoRuntime.waitStartedAt = Date.now();
-        autoRuntime.stableResponseKey = '';
-        autoRuntime.stableSince = 0;
-        if (!saveAutoRuntime()) return;
-        scheduleAutoAuditCheck(0);
-        return;
-      }
-
+      // Plain user messages/files remain supplemental context. If no stronger
+      // terminal/explicit evidence exists, send the expected continuation now.
       await sendAutoAuditContinuation(kind);
     }, delay);
   }
@@ -4509,21 +11182,23 @@ function assistantTextCandidates(turn) {
       const turns = getChatGPTTurns();
       const anchorId = kind === 'second' ? autoRuntime.coreUserId : autoRuntime.secondUserId;
       const anchor = findTurnById(anchorId, turns);
-      const manualUser = anchor ? userTurnAfter(anchor, turns) : null;
-      if (manualUser) {
-        const manualKind = classifyAuditTurn(manualUser);
-        if (manualKind !== kind) {
-          pauseAutoAudit('A manual user message appeared before the next audit wave. The chain stopped to avoid sending into the wrong context.');
-          return;
-        }
+      const flow = anchor ? auditUserFlowAfter(anchor, kind, turns) : null;
 
-        // The user manually sent the exact expected next wave during the configured
-        // delay. Adopt it instead of sending a duplicate.
-        const id = getTurnId(manualUser);
+      if (flow?.conflictingTurn) {
+        pauseAutoAudit(`A different audit command (${waveLabel(flow.conflictingKind)}) appeared before ${waveLabel(kind)}. Auto3 stopped only because an explicit competing audit lineage exists.`);
+        return;
+      }
+
+      if (flow?.expectedTurn) {
+        // The user manually sent the exact expected next wave. Adopt it instead
+        // of duplicating it; any plain messages around it remain supplemental.
+        const id = getTurnId(flow.expectedTurn);
         autoRuntime.seenUserId = id;
         autoRuntime.waitStartedAt = Date.now();
         autoRuntime.stableResponseKey = '';
         autoRuntime.stableSince = 0;
+        autoRuntime.stageAssistantId = '';
+        autoRuntime.anchorMissingSince = 0;
         if (kind === 'second') {
           autoRuntime.secondUserId = id;
           autoRuntime.stage = 'wait-second';
@@ -4540,28 +11215,179 @@ function assistantTextCandidates(turn) {
     }, delay);
   }
 
+  function reconcileEnabledIdleAuditRuntime(turns = getChatGPTTurns(), options = {}) {
+    if (!autoRuntime?.enabled || autoRuntime.stage !== 'idle') return false;
+    if (chatGPTAuthInterstitialVisible()) return false;
+
+    // Rebuild the live lineage BEFORE backfilling COMPLETE records. Backfilling
+    // first can create a provisional runId while coreUserId is still empty; the
+    // subsequent rebuild then correctly decides it is a new lineage, creates a
+    // second runId, and deletes the just-captured record. On a virtualized DOM
+    // that needless churn can lose the only COMPLETE proof. Establish the run
+    // identity first, then capture under that exact run.
+    const liveLineage = visibleAuditLineage(turns);
+    if (liveLineage.blockedByReset) return false;
+    const latestAudit = liveLineage.performance || liveLineage.second || liveLineage.core;
+    if (latestAudit) {
+      const id = getTurnId(latestAudit);
+      const kind = classifyAuditTurn(latestAudit);
+
+      if (!id) {
+        setStatus(
+          `Auto3 found the latest ${waveLabel(kind)} command but ChatGPT has not hydrated its stable turn id yet. Recovery will retry automatically.`,
+          'info'
+        );
+        scheduleAutoAuditCheck(700);
+        return true;
+      }
+
+      if (resumeRuntimeFromAuditTurn(latestAudit, { turns })) {
+        backfillVisibleCompletedAuditResults();
+        setStatus(
+          `Auto3 reconciled enabled+READY state from the live ${waveLabel(kind)} lineage. Continuing automatically; no OFF/ON toggle or Resume is required.`,
+          'success'
+        );
+        return true;
+      }
+    }
+
+    // DOM virtualization fallback. Audit result records are scoped to this exact
+    // conversation and are written only from structurally COMPLETE handoffs.
+    const coherentRecords = currentChatAuditRecords();
+    const core = coherentRecords.find(record => record.kind === 'core') || null;
+    const second = coherentRecords.find(record => record.kind === 'second') || null;
+    const performance = coherentRecords.find(record => record.kind === 'performance') || null;
+    const latestRecord = performance || second || core;
+    if (!latestRecord?.text) return false;
+
+    let nextStage = '';
+    if (performance?.text) nextStage = 'complete';
+    else if (second?.text) nextStage = 'sending-performance';
+    else if (core?.text) nextStage = 'sending-second';
+    if (!nextStage) return false;
+
+    autoRuntime.stage = nextStage;
+    autoRuntime.runId = String(latestRecord.runId || autoRuntime.runId || createAuditRunId());
+    autoRuntime.startedAt = Number(autoRuntime.startedAt || latestRecord.completedAt || Date.now());
+    autoRuntime.waitStartedAt = nextStage === 'complete' ? 0 : Date.now();
+    autoRuntime.projectName = sanitizeProjectIdentity(
+      latestRecord.projectName || autoRuntime.projectName || ''
+    );
+    autoRuntime.projectNameSource = autoRuntime.projectName
+      ? (autoRuntime.projectNameSource || 'handoff')
+      : '';
+    autoRuntime.pausedReason = '';
+    autoRuntime.pausedFromStage = '';
+    autoRuntime.expectedKind = '';
+    autoRuntime.stableResponseKey = '';
+    autoRuntime.stableSince = 0;
+    autoRuntime.anchorMissingSince = 0;
+    clearAutoComposerHold();
+
+    if (nextStage === 'complete') {
+      autoRuntime.completeAt = autoRuntime.completeAt || Number(performance?.completedAt) || Date.now();
+    }
+
+    if (!saveAutoRuntime({ pauseOnFailure: false })) {
+      scheduleAutoAuditCheck(1000);
+      return true;
+    }
+
+    if (nextStage === 'complete') {
+      setStatus(
+        'Auto3 reconciled READY from cached COMPLETE Core + Second + Performance handoffs. Chain is DONE.',
+        'success'
+      );
+      return true;
+    }
+
+    const nextKind = nextStage === 'sending-second' ? 'second' : 'performance';
+    setStatus(
+      `Auto3 reconciled READY from cached COMPLETE audit evidence. Continuing with ${waveLabel(nextKind)} automatically.`,
+      'success'
+    );
+    scheduleAutoAuditCheck(0);
+    return true;
+  }
+
   async function evaluateAutoAudit(options = {}) {
     if (autoAuditEvaluating) return;
     if (detectSite().key !== 'chatgpt') return;
 
     autoAuditEvaluating = true;
     try {
+      if (
+        autoComposerHoldReason &&
+        !['sending-second', 'sending-performance', 'sending-continuation'].includes(autoRuntime?.stage)
+      ) {
+        clearAutoComposerHold();
+        renderAutoAuditState();
+      }
+
       const turns = getChatGPTTurns();
+
+      if (chatGPTAuthInterstitialVisible() || chatGPTRootIsQuarantined()) {
+        setStatus(
+          'AUTH HOLD: ChatGPT is showing a logged-out/account surface. AICHATBUTTONS is quarantined: no send, rename, navigation, lease, or audit-state mutation runs on this root page.',
+          'warning'
+        );
+        renderAutoAuditState();
+        scheduleAutoAuditCheck(AUTO_AUTH_HOLD_RETRY_MS);
+        return;
+      }
+
+      const startHandoff = readStartAuditHandoff();
+      if (startHandoffIsCommitted(startHandoff) && !autoRuntime?.enabled) {
+        recoverSentStartCore({
+          source: 'evaluate-bootstrap',
+          skipMonitor: true
+        });
+      }
+
+      if (startHandoffIsPrepared(startHandoff)) {
+        const visibleReceipt = startHandoff.receipt && exactReceiptUserTurn(startHandoff.receipt, turns);
+        if (visibleReceipt) {
+          markStartAuditHandoffSent(startHandoff);
+          recoverSentStartCore({ source: 'evaluate-visible-start-receipt', skipMonitor: true });
+          scheduleSentStartRecovery();
+        } else if (startHandoffComposerStillPrepared(startHandoff)) {
+          const recoveredClick = await recoverArmedStartSend({ waitMs: 900, reschedule: true });
+          if (recoveredClick) return;
+        }
+      }
+
       if (!ensureAutoConversation(turns)) return;
+
+      // Do this only after lease ownership/reload reconciliation. Standby tabs
+      // must never rewrite shared runtime clocks merely because their own timer
+      // was throttled while another tab owned the conversation.
+      reconcileExecutionGap();
 
       const latestUser = latestChatGPTUserTurn(turns);
       const latestUserId = getTurnId(latestUser);
       const latestKind = classifyAuditTurn(latestUser);
 
       if (autoRuntime.stage === 'complete') {
-        if (latestUserId && latestUserId !== autoRuntime.seenUserId && latestKind === 'core') {
-          resetAutoAuditRuntime({ silent: true });
-          armFromCoreTurn(latestUser, { allowCompleted: false });
+        if (latestKind === 'core') {
+          if (!latestUserId) {
+            setStatus('A new AUDIT CORE is visible. Waiting for ChatGPT to hydrate its stable turn identity before re-arming Auto3.', 'info');
+            scheduleAutoAuditCheck(800);
+            return;
+          }
+          if (latestUserId !== autoRuntime.seenUserId) {
+            resetAutoAuditRuntime({ silent: true });
+            // The tab may have been frozen/offscreen until this new Core already
+            // finished. A fresh authored Core must still be adopted; completion
+            // is consumed by the normal wait-core gate on the next evaluation.
+            armFromCoreTurn(latestUser, { allowCompleted: true });
+          }
         }
         return;
       }
 
       if (autoRuntime.stage === 'idle') {
+        if (reconcileEnabledIdleAuditRuntime(turns, { source: 'evaluate-idle' })) return;
+
         if (!autoRuntime.seenUserId) {
           autoRuntime.seenUserId = latestUserId;
           autoRuntime.baselineAssistantKey = assistantFingerprint(assistantTurnAfter(latestUser, turns));
@@ -4600,7 +11426,13 @@ function assistantTextCandidates(turn) {
         return;
       }
 
-      if (autoRuntime.stage === 'paused') return;
+      if (autoRuntime.stage === 'paused') {
+        if (recoverCommittedSendFromDom(turns)) return;
+        if (recoverStalePauseFromConversation(turns, { source: 'evaluate' })) return;
+        return;
+      }
+
+      if (['await-second-user', 'await-performance-user', 'await-continuation-user'].includes(autoRuntime.stage) && recoverCommittedSendFromDom(turns)) return;
 
       if (autoRuntime.stage === 'sending-continuation') {
         scheduleAuditContinuation(autoRuntime.continuationKind);
@@ -4660,28 +11492,76 @@ function assistantTextCandidates(turn) {
         return;
       }
 
-      const stageAnchorId = autoRuntime.stage === 'wait-core'
-        ? autoRuntime.coreUserId
-        : autoRuntime.stage === 'wait-second'
-          ? autoRuntime.secondUserId
-          : autoRuntime.performanceUserId;
-      let anchor = findTurnById(stageAnchorId, turns);
+      const currentWaveKind = activeWaveKind(autoRuntime.stage);
+      const savedStageAnchorId = activeStageAnchorId(autoRuntime.stage);
+      let anchor = findTurnById(savedStageAnchorId, turns);
       if (!anchor) {
         anchor = recoverExpectedStageAnchor(autoRuntime.stage, turns);
       }
-      if (!anchor) {
-        pauseAutoAudit('The saved audit anchor is not present in this conversation. Open the original ChatGPT audit thread or use Adopt current audit if this is the correct recovered wave.');
-        return;
+
+      let assistant = null;
+
+      if (anchor) {
+        autoRuntime.anchorMissingSince = 0;
+
+        const flow = auditUserFlowAfter(anchor, currentWaveKind, turns);
+
+        if (flow.conflictingTurn) {
+          pauseAutoAudit(`A different explicit audit command (${waveLabel(flow.conflictingKind)}) appeared while ${waveLabel(currentWaveKind)} was active. Auto3 stopped to avoid crossing audit lineages.`);
+          return;
+        }
+
+        if (flow.expectedTurn && getTurnId(flow.expectedTurn) !== getTurnId(anchor)) {
+          // A manual same-wave continuation was inserted. Rebuild around that
+          // explicit audit command; supplemental messages do not invalidate it.
+          if (resumeRuntimeFromAuditTurn(flow.expectedTurn, { turns })) return;
+        }
+
+        assistant = auditAssistantAcrossSupplementals(anchor, currentWaveKind, turns);
+        if (assistant) {
+          rememberStageAssistant(assistant);
+        } else if (flow.supplementals.length) {
+          await watchSupplementalAuditContext(currentWaveKind, anchor, flow, turns);
+          return;
+        }
+      } else {
+        // Missing from the mounted DOM is not missing from the conversation.
+        // Long ChatGPT responses routinely virtualize the user turn above them.
+        if (!autoRuntime.anchorMissingSince) {
+          autoRuntime.anchorMissingSince = Date.now();
+          saveAutoRuntime({ pauseOnFailure: false });
+        }
+
+        if (visibleUserConflictsWithActiveStage(turns)) {
+          pauseAutoAudit('A different explicit audit command is visible while the saved audit anchor is virtualized. Auto3 stopped to avoid crossing audit lineages.');
+          return;
+        }
+
+        assistant = recoverVirtualizedStageAssistant(turns);
+
+        if (!assistant) {
+          setStatus(
+            `${waveLabel(currentWaveKind)} anchor is temporarily outside ChatGPT's mounted DOM. Auto3 preserved lineage and is watching for the active response.`,
+            'info'
+          );
+
+          if (chatGPTIsGenerating()) {
+            resetIdleStallWatch();
+            scheduleAutoAuditCheck(AUTO_LIVENESS_CHECK_MS);
+            return;
+          }
+
+          await watchIdleAuditStall(currentWaveKind, null, 'anchor-virtualized');
+          return;
+        }
+
+        setStatus(
+          `${waveLabel(currentWaveKind)} user anchor is virtualized, but the active assistant response is still mounted. Auto3 recovered it directly.`,
+          'success'
+        );
       }
 
-      const interveningUser = userTurnAfter(anchor, turns);
-      if (interveningUser) {
-        pauseAutoAudit('A manual user message was sent while an audit response was being awaited. Chain stopped to avoid advancing from stale context.');
-        return;
-      }
-
-      const assistant = assistantTurnAfter(anchor, turns);
-      const currentWaveKind = activeWaveKind(autoRuntime.stage);
+      if (assistant) rememberStageAssistant(assistant);
 
       if (!assistant) {
         if (chatGPTIsGenerating()) {
@@ -4748,10 +11628,33 @@ function assistantTextCandidates(turn) {
         return;
       }
 
+      // Persist the final handoff before changing stage. DOM virtualization, reload,
+      // later continuations and sidebar churn can no longer make a completed audit
+      // disappear from one-click copy or optional disk output.
+      const capturedFinal = captureCompletedAudit(
+        currentWaveKind,
+        final.text,
+        gate,
+        waveUserId(currentWaveKind)
+      );
+      if (!capturedFinal) {
+        // The terminal handoff is visible but its durable cache commit failed or
+        // was fenced by a newer/reset lineage. Never advance to the next wave
+        // without the exact COMPLETE evidence that continuation/reload/save logic
+        // depends on. Stay on this wave and retry/reconcile instead.
+        setStatus(
+          `${waveLabel(currentWaveKind)} is COMPLETE in the conversation, but its durable handoff commit was not accepted. Auto3 is holding this wave and will retry/reconcile without sending the next wave.`,
+          'warning'
+        );
+        scheduleAutoAuditCheck(1200);
+        return;
+      }
+
       if (autoRuntime.stage === 'wait-core') {
         autoRuntime.continuationKind = '';
         autoRuntime.continuationReason = '';
         autoRuntime.continuationPreviousUserId = '';
+        clearStageAssistant({ save: false });
         resetIdleStallWatch({ save: false });
         autoRuntime.stage = 'sending-second';
         autoRuntime.waitStartedAt = Date.now();
@@ -4764,6 +11667,7 @@ function assistantTextCandidates(turn) {
         autoRuntime.continuationKind = '';
         autoRuntime.continuationReason = '';
         autoRuntime.continuationPreviousUserId = '';
+        clearStageAssistant({ save: false });
         resetIdleStallWatch({ save: false });
         autoRuntime.stage = 'sending-performance';
         autoRuntime.waitStartedAt = Date.now();
@@ -4773,9 +11677,11 @@ function assistantTextCandidates(turn) {
       }
 
       if (autoRuntime.stage === 'wait-performance') {
+        clearAutoComposerHold();
         autoRuntime.continuationKind = '';
         autoRuntime.continuationReason = '';
         autoRuntime.continuationPreviousUserId = '';
+        clearStageAssistant({ save: false });
         resetIdleStallWatch({ save: false });
         autoRuntime.stage = 'complete';
         autoRuntime.completeAt = Date.now();
@@ -4834,6 +11740,13 @@ function assistantTextCandidates(turn) {
     const id = getTurnId(userTurn);
     if (!kind || !stage || !id) return false;
 
+    // Rebuild only from the coherent newest audit lineage. The old implementation
+    // searched backward by type, so Core A -> Second A -> Core B -> Performance
+    // could incorrectly pair Performance with Second A/Core A and jump across the
+    // explicit Core B boundary.
+    const lineage = visibleAuditLineage(turns);
+    if (lineage.blockedByReset || lineage[kind] !== userTurn) return false;
+
     let coreUserId = '';
     let secondUserId = '';
     let performanceUserId = '';
@@ -4841,27 +11754,50 @@ function assistantTextCandidates(turn) {
     if (kind === 'core') {
       coreUserId = id;
     } else if (kind === 'second') {
-      const priorCore = previousAuditUserTurn(userTurn, 'core', turns);
-      coreUserId = getTurnId(priorCore);
-      if (!priorCore || !coreUserId) return false;
+      coreUserId = getTurnId(lineage.core);
+      if (!lineage.core || !coreUserId) return false;
       secondUserId = id;
     } else {
-      const priorSecond = previousAuditUserTurn(userTurn, 'second', turns);
-      const priorCore = priorSecond ? previousAuditUserTurn(priorSecond, 'core', turns) : null;
-      coreUserId = getTurnId(priorCore);
-      secondUserId = getTurnId(priorSecond);
-      if (!priorSecond || !priorCore || !coreUserId || !secondUserId) return false;
+      coreUserId = getTurnId(lineage.core);
+      secondUserId = getTurnId(lineage.second);
+      if (!lineage.core || !lineage.second || !coreUserId || !secondUserId) return false;
       performanceUserId = id;
     }
 
     // Validation above is side-effect-free. Commit one complete rebuilt runtime only
-    // after the whole lineage is known to be valid.
+    // after the whole lineage is known to be valid. Same-wave CONTINUE commands are
+    // new user-turn anchors but not new audit runs, so preserve run identity when
+    // the persisted runtime was already working that same wave.
+    const runtimeWaveKind = activeWaveKind(autoRuntime.stage) ||
+      auditKindForStage(autoRuntime.pausedFromStage) ||
+      String(autoRuntime.continuationKind || '');
+    const continuingCurrentRun = Boolean(
+      autoRuntime.runId &&
+      auditTurnIsContinuation(userTurn) &&
+      runtimeWaveKind === kind
+    );
+    const sameRuntimeLineage = Boolean(
+      autoRuntime.runId &&
+      (
+        (autoRuntime.coreUserId && String(autoRuntime.coreUserId) === String(coreUserId)) ||
+        continuingCurrentRun
+      )
+    );
+
+    const inferredProjectName = sanitizeProjectIdentity(projectNameFromCoreTurn(lineage.core));
+    const previousProjectName = sanitizeProjectIdentity(autoRuntime.projectName || '');
+    const lineageProjectName = sameRuntimeLineage
+      ? (inferredProjectName || previousProjectName)
+      : inferredProjectName;
+    const projectChanged = lineageProjectName !== previousProjectName;
+
     const nextRuntime = {
       ...autoRuntime,
       conversationKey: currentConversationKey(),
-      anchorUserId: autoRuntime.anchorUserId || coreUserId || id,
+      anchorUserId: sameRuntimeLineage ? (autoRuntime.anchorUserId || coreUserId || id) : (coreUserId || id),
       seenUserId: id,
-      startedAt: autoRuntime.startedAt || Date.now(),
+      runId: sameRuntimeLineage ? autoRuntime.runId : createAuditRunId(),
+      startedAt: sameRuntimeLineage ? (autoRuntime.startedAt || Date.now()) : Date.now(),
       waitStartedAt: Date.now(),
       stableResponseKey: '',
       stableSince: 0,
@@ -4873,6 +11809,18 @@ function assistantTextCandidates(turn) {
       pendingSendPreviousUserId: '',
       pendingSendStartedAt: 0,
       pendingSendRetries: 0,
+      pendingSendClickArmed: false,
+      stageAssistantId: '',
+      resetBarrierActive: false,
+      resetBarrierUserId: '',
+      anchorMissingSince: 0,
+      projectName: lineageProjectName,
+      projectNameSource: lineageProjectName ? (inferredProjectName ? 'artifact' : autoRuntime.projectNameSource || 'artifact') : '',
+      renameAppliedName: (!sameRuntimeLineage || projectChanged) ? '' : autoRuntime.renameAppliedName,
+      renamePersistedName: (!sameRuntimeLineage || projectChanged) ? '' : autoRuntime.renamePersistedName,
+      renamePersistedAt: (!sameRuntimeLineage || projectChanged) ? 0 : autoRuntime.renamePersistedAt,
+      renameAttemptName: (!sameRuntimeLineage || projectChanged) ? '' : autoRuntime.renameAttemptName,
+      renameAttemptCount: (!sameRuntimeLineage || projectChanged) ? 0 : autoRuntime.renameAttemptCount,
       stage,
       coreUserId,
       secondUserId,
@@ -4882,6 +11830,22 @@ function assistantTextCandidates(turn) {
     clearAutoTimers();
     autoRuntime = nextRuntime;
     if (!saveAutoRuntime()) return false;
+
+    if (!sameRuntimeLineage) {
+      // A newly reconstructed Core lineage must not inherit one-record-per-wave
+      // cache entries from an older run in the same conversation.
+      clearAuditResultsForConversation(currentConversationKey());
+    }
+
+    if (autoRuntime.projectName) {
+      const renameContext = {
+        source: autoRuntime.projectNameSource || 'artifact',
+        conversationKey: currentConversationKey(),
+        runStartedAt: autoRuntime.startedAt || 0
+      };
+      maybeRenameConversation(autoRuntime.projectName, renameContext).catch(() => { });
+      scheduleConversationTitleGuard(autoRuntime.projectName, renameContext);
+    }
 
     const assistant = assistantTurnAfter(userTurn, turns);
     const proof = assistant ? responseGateFromAssistantTurn(stage, assistant) : { state: 'unknown', sourceCount: 0 };
@@ -4907,83 +11871,225 @@ function assistantTextCandidates(turn) {
       return false;
     }
 
-    const turns = getChatGPTTurns();
-    const latestUser = latestChatGPTUserTurn(turns);
-    const latestAudit = latestRecognizableAuditUserTurn(turns);
+    let turns = getChatGPTTurns();
 
-    // A later non-audit user message means the lineage is no longer safe to resume.
-    if (latestUser && latestAudit && latestUser !== latestAudit) {
-      setStatus('Resume stopped: a newer non-audit user message exists after the last audit command. Start/adopt the intended audit wave explicitly to avoid attaching automation to stale context.', 'warning');
-      return false;
+    if (
+      autoRuntime.stage === 'paused' &&
+      recoverStalePauseFromConversation(turns, { source: 'manual-resume' })
+    ) {
+      return true;
     }
 
+    let latestUser = latestChatGPTUserTurn(turns);
+    let lineage = visibleAuditLineage(turns);
+    let latestAudit = lineage.blockedByReset
+      ? null
+      : (lineage.performance || lineage.second || lineage.core);
+
     if (!latestAudit) {
-      setStatus('Resume failed: no recognizable AUDIT CORE / SECOND WAVE / PERFORMANCE user turn is present in this conversation.', 'warning');
+      // Emergency semantic fallback. Only authored ChatGPT message nodes are
+      // eligible, so visible UI/help text can never become an audit command.
+      const fallbackTurns = [];
+      const seen = new Set();
+
+      for (const message of document.querySelectorAll(
+        '[data-message-author-role="user"], [data-message-author-role="assistant"]'
+      )) {
+        const role = String(message.getAttribute('data-message-author-role') || '').toLowerCase();
+        if (role !== 'user' && role !== 'assistant') continue;
+        const wrapper = message.closest?.(
+          'section[data-turn], article[data-turn], ' +
+          'section[data-testid^="conversation-turn-"], article[data-testid^="conversation-turn-"], ' +
+          '[data-testid^="conversation-turn-"]'
+        ) || message;
+        if (seen.has(wrapper)) continue;
+        seen.add(wrapper);
+        fallbackTurns.push(wrapper);
+      }
+
+      if (fallbackTurns.length) {
+        fallbackTurns.sort((a, b) => {
+          if (a === b) return 0;
+          const relation = a.compareDocumentPosition(b);
+          if (relation & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+          if (relation & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+          return 0;
+        });
+        turns = fallbackTurns;
+        latestUser = latestChatGPTUserTurn(turns);
+        lineage = visibleAuditLineage(turns);
+        latestAudit = lineage.blockedByReset
+          ? null
+          : (lineage.performance || lineage.second || lineage.core);
+      }
+    }
+
+    // Plain user messages/files after an audit command are supplemental context.
+    // Only a newer canonical audit command can replace the current audit lineage,
+    // and latestAudit already points at that newest explicit audit command.
+    if (!latestAudit) {
+      const userCount = turns.filter(turn => turnRole(turn) === 'user').length;
+      setStatus(`Resume failed: ${userCount} user turn(s) are visible, but none match canonical AUDIT CORE / SECOND WAVE / PERFORMANCE framing.`, 'warning');
       return false;
     }
 
     return resumeRuntimeFromAuditTurn(latestAudit, { turns });
   }
 
-  function recoverLegacySendRegistrationPauseFromDom() {
-    if (!autoRuntime || autoRuntime.stage !== 'paused') return false;
+  function recoverStalePauseFromConversation(turns = getChatGPTTurns(), options = {}) {
+    if (!autoRuntime?.enabled || autoRuntime.stage !== 'paused') return false;
 
     const reason = String(autoRuntime.pausedReason || '');
-    if (!/Send was recorded, but its user turn is still absent|user turn is still absent/i.test(reason)) {
-      return false;
+    if (pauseIsExplicitHumanStop(reason)) return false;
+
+    // Strongest evidence first: exact machine receipt / committed click.
+    if (recoverCommittedSendFromDom(turns)) return true;
+
+    const latestUser = latestChatGPTUserTurn(turns);
+    const liveLineage = visibleAuditLineage(turns);
+    const latestAudit = liveLineage.blockedByReset
+      ? null
+      : (liveLineage.performance || liveLineage.second || liveLineage.core);
+
+    // A newer plain user turn is supplemental context, not an audit-lineage
+    // breaker. The newest canonical audit command remains the lineage anchor.
+    if (latestAudit) {
+      const kind = classifyAuditTurn(latestAudit);
+      const stage = stageForAuditKind(kind);
+      const id = getTurnId(latestAudit);
+
+      if (kind && stage && id) {
+        const rebuilt = resumeRuntimeFromAuditTurn(latestAudit, { turns });
+        if (rebuilt) {
+          clearAutoComposerHold();
+          setStatus(
+            `Auto3 self-healed a stale PAUSE from the live ${waveLabel(kind)} lineage. No manual Resume was required.`,
+            'success'
+          );
+          renderAutoAuditState();
+          return true;
+        }
+      }
     }
+
+    // DOM virtualization / reload fallback. COMPLETE handoffs were already
+    // cached by conversation before stage advancement, so they can prove how
+    // far this exact audit run had safely reached.
+    const coherentRecords = currentChatAuditRecords();
+    const core = coherentRecords.find(record => record.kind === 'core') || null;
+    const second = coherentRecords.find(record => record.kind === 'second') || null;
+    const performance = coherentRecords.find(record => record.kind === 'performance') || null;
+    const currentRunId = String(autoRuntime.runId || '');
+
+    const belongsToCurrentRun = record => Boolean(
+      record?.text &&
+      (!currentRunId || (record.runId && String(record.runId) === currentRunId))
+    );
+
+    const coreReady = belongsToCurrentRun(core);
+    const secondReady = belongsToCurrentRun(second);
+    const performanceReady = belongsToCurrentRun(performance);
+
+    let nextStage = '';
+    if (coreReady && secondReady && performanceReady) {
+      nextStage = 'complete';
+    } else if (coreReady && secondReady) {
+      nextStage = 'sending-performance';
+    } else if (coreReady) {
+      nextStage = 'sending-second';
+    }
+
+    if (!nextStage) return false;
+
+    autoRuntime.stage = nextStage;
+    autoRuntime.pausedReason = '';
+    autoRuntime.pausedFromStage = '';
+    autoRuntime.expectedKind = '';
+    autoRuntime.waitStartedAt = nextStage === 'complete' ? 0 : Date.now();
+    autoRuntime.stableResponseKey = '';
+    autoRuntime.stableSince = 0;
+    autoRuntime.anchorMissingSince = 0;
+    clearAutoComposerHold();
+
+    if (nextStage === 'complete') {
+      autoRuntime.completeAt = autoRuntime.completeAt || Date.now();
+    }
+
+    if (!saveAutoRuntime({ pauseOnFailure: false })) {
+      setStatus(
+        'Auto3 found durable audit evidence for stale-PAUSE recovery, but runtime storage is temporarily unavailable. It will retry without restarting Core.',
+        'warning'
+      );
+      scheduleAutoAuditCheck(1000);
+      return true;
+    }
+
+    if (nextStage === 'complete') {
+      setStatus(
+        'Auto3 self-healed stale PAUSE from cached Core + Second + Performance results. Chain is COMPLETE.',
+        'success'
+      );
+      renderAutoAuditState();
+      return true;
+    }
+
+    const nextKind = nextStage === 'sending-second' ? 'second' : 'performance';
+    setStatus(
+      `Auto3 self-healed stale PAUSE from durable completed-wave evidence. Continuing automatically with ${waveLabel(nextKind)}.`,
+      'success'
+    );
+    renderAutoAuditState();
+    scheduleAutoAuditCheck(0);
+    return true;
+  }
+
+  function recoverLegacySendRegistrationPauseFromDom() {
+    if (!autoRuntime || autoRuntime.stage !== 'paused') return false;
+    const reason = String(autoRuntime.pausedReason || '');
+    if (!/Send was recorded, but its user turn is still absent|user turn is still absent/i.test(reason)) return false;
 
     const turns = getChatGPTTurns();
     const expectedKind = String(
-      autoRuntime.expectedKind ||
-      autoRuntime.continuationKind ||
-      (autoRuntime.pausedFromStage === 'await-second-user'
-        ? 'second'
-        : autoRuntime.pausedFromStage === 'await-performance-user'
-          ? 'performance'
-          : '')
+      autoRuntime.expectedKind || autoRuntime.continuationKind ||
+      (autoRuntime.pausedFromStage === 'await-second-user' ? 'second' : autoRuntime.pausedFromStage === 'await-performance-user' ? 'performance' : '')
     );
-
-    const latestAudit = latestRecognizableAuditUserTurn(turns);
+    const liveLineage = visibleAuditLineage(turns);
+    if (liveLineage.blockedByReset) return false;
+    const latestAudit = liveLineage.performance || liveLineage.second || liveLineage.core;
     const fallbackKind = expectedKind || classifyAuditTurn(latestAudit);
     if (!fallbackKind) return false;
 
     let matched = findPendingSentAuditTurn(fallbackKind, turns);
-    if (!matched && latestAudit && classifyAuditTurn(latestAudit) === fallbackKind) {
-      matched = latestAudit;
+    if (matched && !autoRuntime.pendingSendReceipt) {
+      const canonical = fallbackKind === 'core' ? liveLineage.core : fallbackKind === 'second' ? liveLineage.second : liveLineage.performance;
+      const sameCanonical = canonical && (
+        canonical === matched ||
+        (getTurnId(canonical) && getTurnId(canonical) === getTurnId(matched))
+      );
+      if (!sameCanonical) matched = null;
     }
 
-    if (matched) {
-      const id = getTurnId(matched);
-      autoRuntime.stage = waveWaitStage(fallbackKind);
-      autoRuntime.pausedReason = '';
-      autoRuntime.pausedFromStage = '';
-      if (id) {
-        setWaveUserId(fallbackKind, id);
-        autoRuntime.seenUserId = id;
-      }
-      clearPendingSendReceipt({ save: false });
-      autoRuntime.waitStartedAt = Date.now();
-      autoRuntime.stableResponseKey = '';
-      autoRuntime.stableSince = 0;
-      if (!saveAutoRuntime()) return false;
-      setStatus(`Recovered the old false send-registration pause. ${waveLabel(fallbackKind)} is already present; Auto3 resumed.`, 'success');
-      scheduleAutoAuditCheck(0);
-      return true;
+    if (!matched) {
+      autoRuntime.pausedReason = 'Legacy send-registration state is ambiguous relative to the current visible audit lineage. Auto3 refuses heuristic adoption across a newer/virtualized root; explicit Reset or an exact modern receipt is required.';
+      saveAutoRuntime({ pauseOnFailure: false });
+      setStatus('Legacy send-registration recovery failed closed because lineage membership cannot be proven.', 'warning');
+      return false;
     }
 
-    autoRuntime.stage = autoRuntime.pausedFromStage === 'await-second-user'
-      ? 'await-second-user'
-      : autoRuntime.pausedFromStage === 'await-performance-user'
-        ? 'await-performance-user'
-        : 'await-continuation-user';
-    autoRuntime.expectedKind = fallbackKind;
+    const id = getTurnId(matched);
+    autoRuntime.stage = waveWaitStage(fallbackKind);
     autoRuntime.pausedReason = '';
     autoRuntime.pausedFromStage = '';
-    autoRuntime.pendingSendStartedAt = Date.now();
+    if (id) {
+      setWaveUserId(fallbackKind, id);
+      autoRuntime.seenUserId = id;
+    }
+    clearPendingSendReceipt({ save: false });
     autoRuntime.waitStartedAt = Date.now();
+    autoRuntime.stableResponseKey = '';
+    autoRuntime.stableSince = 0;
     if (!saveAutoRuntime()) return false;
-    setStatus('Recovered the old send-registration pause. Auto3 will keep watching ChatGPT hydration without human intervention.', 'success');
+    setStatus(`Recovered legacy registration only after canonical lineage validation. ${waveLabel(fallbackKind)} is already present; Auto3 resumed.`, 'success');
     scheduleAutoAuditCheck(0);
     return true;
   }
@@ -5010,7 +12116,10 @@ function assistantTextCandidates(turn) {
       }
     }
 
-    if (!userTurn) userTurn = latestRecognizableAuditUserTurn(turns);
+    if (!userTurn) {
+      const lineage = visibleAuditLineage(turns);
+      userTurn = lineage.blockedByReset ? null : (lineage.performance || lineage.second || lineage.core);
+    }
     if (!userTurn) return false;
 
     const kind = classifyAuditTurn(userTurn);
@@ -5055,7 +12164,10 @@ function assistantTextCandidates(turn) {
       }
     }
 
-    if (!userTurn) userTurn = latestRecognizableAuditUserTurn(turns);
+    if (!userTurn) {
+      const lineage = visibleAuditLineage(turns);
+      userTurn = lineage.blockedByReset ? null : (lineage.performance || lineage.second || lineage.core);
+    }
     if (!userTurn) return false;
 
     const kind = classifyAuditTurn(userTurn);
@@ -5074,80 +12186,147 @@ function assistantTextCandidates(turn) {
   }
 
   // The MutationObserver is the automation's eyes on the live DOM. Its payload
-// is scaled to what the current state actually needs, because token streaming
-// is the most mutation-heavy surface on a ChatGPT page:
-//   'stream' - enabled, waiting for or sending a wave: full subtree watching
-//              including characterData, so streamed text progress is seen;
-//   'turns'  - enabled, idle/complete/paused: childList only (no characterData
-//              flood); new turn insertions and root replacements still seen;
-//   'nav'    - disabled: childList only, binding/root tracking, no scheduling.
-// Config transitions (disable, pause, complete, wave send, root replacement)
-// recreate the observer so the heavy config never outlives the state that
-// needs it.
-function autoAuditObserverConfig() {
-  if (detectSite().key !== 'chatgpt') return null;
-  if (!autoRuntime?.enabled) return 'nav';
-  return ['wait-core', 'wait-second', 'wait-performance',
-    'sending-second', 'sending-performance', 'sending-continuation',
-    'await-second-user', 'await-performance-user', 'await-continuation-user'
-  ].includes(autoRuntime.stage)
-    ? 'stream'
-    : 'turns';
-}
-
-function ensureAutoAuditObserver() {
-  const config = autoAuditObserverConfig();
-  if (!config) {
-    if (autoAuditObserver) {
-      autoAuditObserver.disconnect();
-      autoAuditObserver = null;
-    }
-    autoAuditObserverRoot = null;
-    autoAuditObservedConfig = null;
-    return;
+  // is scaled to what the current state actually needs, because token streaming
+  // is the most mutation-heavy surface on a ChatGPT page:
+  //   'stream' - enabled, waiting for or sending a wave: full subtree watching
+  //              including characterData, so streamed text progress is seen;
+  //   'turns'  - enabled, idle/complete/paused: childList only (no characterData
+  //              flood); new turn insertions and root replacements still seen;
+  //   'nav'    - disabled: childList only, binding/root tracking, no scheduling.
+  // Config transitions (disable, pause, complete, wave send, root replacement)
+  // recreate the observer so the heavy config never outlives the state that
+  // needs it.
+  function autoAuditObserverConfig() {
+    if (detectSite().key !== 'chatgpt') return null;
+    if (!autoRuntime?.enabled) return 'nav';
+    return ['wait-core', 'wait-second', 'wait-performance',
+      'sending-second', 'sending-performance', 'sending-continuation',
+      'await-second-user', 'await-performance-user', 'await-continuation-user'
+    ].includes(autoRuntime.stage)
+      ? 'stream'
+      : 'turns';
   }
 
-  const root = document.querySelector('main') || document.body;
-  if (!root) return;
-
-  const wasBound = Boolean(autoAuditObserver && autoAuditObserverRoot);
-  const rootChanged = wasBound && autoAuditObserverRoot !== root;
-  if (wasBound && !rootChanged && autoAuditObserverRoot.isConnected && autoAuditObservedConfig === config) return;
-
-  if (autoAuditObserver) autoAuditObserver.disconnect();
-  autoAuditObserver = null;
-  autoAuditObserverRoot = root;
-  autoAuditObservedConfig = config;
-
-  autoAuditObserver = new MutationObserver(() => {
-    // The observed root can be replaced or detached between mutations;
-    // always re-anchor before processing so a live observer never dies.
-    ensureAutoAuditObserver();
-    const previousKey = autoBoundConversationKey;
-    bindAutoRuntimeToCurrentConversation({ claim: false });
-
-    if (previousKey !== autoBoundConversationKey) {
-      renderAutoAuditState();
+  function ensureAutoAuditObserver() {
+    const config = autoAuditObserverConfig();
+    if (!config) {
+      if (autoAuditObserver) {
+        autoAuditObserver.disconnect();
+        autoAuditObserver = null;
+      }
+      autoAuditObserverRoot = null;
+      autoAuditObservedConfig = null;
+      return;
     }
 
-    if (autoRuntime?.enabled) {
-      scheduleAutoAuditCheck(AUTO_OBSERVER_DEBOUNCE_MS);
-    }
-  });
-  autoAuditObserver.observe(root, {
-    childList: true,
-    subtree: true,
-    characterData: config === 'stream'
-  });
+    const root = document.querySelector('main') || document.body;
+    if (!root) return;
 
-  // Exactly one evaluation after a re-bind on a NEW root: mutations that
-  // happened while the observer was detached were not seen, so re-sync the
-  // chain once against the live conversation. Config-only transitions skip
-  // the evaluation because the in-memory stage already moved.
-  if (rootChanged && autoRuntime?.enabled) {
-    evaluateAutoAudit().catch(error => pauseAutoAudit(`Monitor re-bind failed: ${error?.message || 'unexpected runtime error'}.`));
+    const wasBound = Boolean(autoAuditObserver && autoAuditObserverRoot);
+    const rootChanged = wasBound && autoAuditObserverRoot !== root;
+    if (wasBound && !rootChanged && autoAuditObserverRoot.isConnected && autoAuditObservedConfig === config) return;
+
+    if (autoAuditObserver) autoAuditObserver.disconnect();
+    autoAuditObserver = null;
+    autoAuditObserverRoot = root;
+    autoAuditObservedConfig = config;
+
+    autoAuditObserver = new MutationObserver(records => {
+      const external = externalMutationRecords(records);
+
+      // Critical hot-loop guard: renderAutoAuditState() mutates ACB controls.
+      // If the observer root is document.body (or ChatGPT moves our panel under
+      // the observed root), those mutations must be invisible to automation.
+      if (!external.length) return;
+
+      // Streamed assistant tokens arrive predominantly as characterData. They
+      // need one trailing audit debounce, not route binding, title repair,
+      // attachment rediscovery, or other topology work on every token batch.
+      const characterDataOnly = external.every(record => record.type === 'characterData');
+      if (characterDataOnly) {
+        if (autoComposerHoldReason && autoComposerHoldApplicable()) {
+          scheduleAutoComposerHoldProbe(autoComposerHoldKind(), { force: true, delay: 140 });
+        }
+        if (autoRuntime?.enabled && autoAuditObserverConfig() === 'stream') {
+          scheduleAutoAuditCheck(AUTO_OBSERVER_DEBOUNCE_MS);
+        }
+        return;
+      }
+
+      // Topology mutations can replace/detach the observed root. Re-anchor only
+      // for those mutations, never for ordinary streamed text.
+      ensureAutoAuditObserver();
+
+      const previousKey = autoBoundConversationKey;
+      bindAutoRuntimeToCurrentConversation({ claim: false });
+      const conversationChanged = previousKey !== autoBoundConversationKey;
+
+      if (conversationChanged) {
+        miniAttachmentSignature = '';
+        renderAutoAuditState();
+      }
+
+      if (autoRuntime?.projectName && state?.autoRenameChat) {
+        applyPersistentLocalProjectTitle(autoRuntime.projectName);
+      }
+
+      // Mini START is attachment-driven. Repaint only if a composer mutation
+      // actually changes attachment presence/name/busy state.
+      scheduleMiniAttachmentRefresh(external);
+
+      if (!autoRuntime?.enabled) return;
+
+      const configNow = autoAuditObserverConfig();
+
+      if (autoComposerHoldReason && autoComposerHoldApplicable()) {
+        scheduleAutoComposerHoldProbe(autoComposerHoldKind(), {
+          force: true,
+          delay: 140
+        });
+      }
+
+      if (configNow === 'stream') {
+        // Active audit responses still need the normal trailing debounce.
+        scheduleAutoAuditCheck(AUTO_OBSERVER_DEBOUNCE_MS);
+        return;
+      }
+
+      // Idle/complete/paused does not need full response parsing for every React
+      // childList mutation. Only a likely conversation-turn insertion/removal or
+      // a conversation identity change can matter here.
+      const turnMutation = external.some(record => {
+        const nodes = [
+          acbElementFromNode(record.target),
+          ...Array.from(record.addedNodes || []).map(acbElementFromNode),
+          ...Array.from(record.removedNodes || []).map(acbElementFromNode)
+        ].filter(Boolean);
+
+        return nodes.some(node => {
+          if (node.matches?.('[data-message-author-role], [data-testid^="conversation-turn-"]')) return true;
+          if (node.closest?.('[data-message-author-role], [data-testid^="conversation-turn-"]')) return true;
+          if (node.querySelector?.('[data-message-author-role], [data-testid^="conversation-turn-"]')) return true;
+          return false;
+        });
+      });
+
+      if (conversationChanged || turnMutation) {
+        scheduleAutoAuditCheck(AUTO_OBSERVER_DEBOUNCE_MS);
+      }
+    });
+    autoAuditObserver.observe(root, {
+      childList: true,
+      subtree: true,
+      characterData: config === 'stream'
+    });
+
+    // Exactly one evaluation after a re-bind on a NEW root: mutations that
+    // happened while the observer was detached were not seen, so re-sync the
+    // chain once against the live conversation. Config-only transitions skip
+    // the evaluation because the in-memory stage already moved.
+    if (rootChanged && autoRuntime?.enabled) {
+      evaluateAutoAudit().catch(error => pauseAutoAudit(`Monitor re-bind failed: ${error?.message || 'unexpected runtime error'}.`));
+    }
   }
-}
 
   function startAutoAuditMonitor(options = {}) {
     if (detectSite().key !== 'chatgpt') {
@@ -5156,8 +12335,24 @@ function ensureAutoAuditObserver() {
     }
 
     bindAutoRuntimeToCurrentConversation({ claim: false });
+    if (chatGPTRootIsQuarantined() || autoBoundConversationKey?.startsWith('auth:')) {
+      clearAutoTimers();
+      releaseAutoLease(lastStableConversationKey());
+      renderAutoAuditState();
+      ensureAutoAuditObserver();
+      scheduleAutoAuditCheck(AUTO_AUTH_HOLD_RETRY_MS);
+      return;
+    }
 
     ensureAutoAuditObserver();
+    const pendingStart = readStartAuditHandoff();
+    if (startHandoffIsCommitted(pendingStart) && !autoRuntime?.enabled) {
+      // Enable only in memory so claimAutoLease can establish write authority;
+      // durable recovery follows only after that claim is verified.
+      if (!autoRuntime) autoRuntime = emptyAutoRuntime();
+      autoRuntime.enabled = true;
+      autoRuntime.conversationKey = autoBoundConversationKey || currentConversationKey();
+    }
 
     if (!autoRuntime?.enabled) {
       clearAutoTimers();
@@ -5165,14 +12360,47 @@ function ensureAutoAuditObserver() {
       renderAutoAuditState();
       return;
     }
+    if (autoRuntime.stage === 'paused' && pauseIsExplicitHumanStop(autoRuntime.pausedReason)) {
+      releaseAutoLease(autoBoundConversationKey);
+      renderAutoAuditState();
+      return;
+    }
 
-    claimAutoLease();
+    const ownsStartupLease = claimAutoLease();
+    if (!ownsStartupLease) {
+      // Standby tabs may observe/render, but must not reconcile or persist shared
+      // runtime until ownership transfers to them.
+      refreshAutoRuntimeFromStorage();
+      renderAutoAuditState();
+      scheduleAutoAuditCheck(options.immediate ? 350 : 900);
+      return;
+    }
+
+    adoptA3IntentForConversation(autoBoundConversationKey || currentConversationKey());
+    if (startHandoffIsCommitted(pendingStart)) {
+      recoverSentStartCore({ source: 'monitor-bootstrap', skipMonitor: true });
+      writeA3Intent(true, autoBoundConversationKey || currentConversationKey(), { startTransaction: true });
+      adoptA3IntentForConversation(autoBoundConversationKey || currentConversationKey(), { startTransaction: true });
+      scheduleSentStartRecovery();
+    }
+
+    const startupTurns = getChatGPTTurns();
+    recoverCommittedSendFromDom(startupTurns);
     recoverLegacySendRegistrationPauseFromDom();
     recoverLegacyPartialPauseFromDom();
     recoverStrictGatePauseFromDom();
+    recoverStalePauseFromConversation(startupTurns, { source: 'startup' });
+
+    if (autoRuntime.enabled && autoRuntime.stage === 'idle' && reconcileEnabledIdleAuditRuntime(startupTurns, { source: 'monitor-startup' })) {
+      renderAutoAuditState();
+      return;
+    }
 
     if (autoRuntime.stage === 'idle' && !autoRuntime.seenUserId) {
-      resetAutoAuditRuntime({ silent: true });
+      const latestUser = latestChatGPTUserTurn(startupTurns);
+      autoRuntime.seenUserId = getTurnId(latestUser);
+      autoRuntime.baselineAssistantKey = assistantFingerprint(latestUser ? assistantTurnAfter(latestUser, startupTurns) : null);
+      saveAutoRuntime({ pauseOnFailure: false });
     }
 
     renderAutoAuditState();
@@ -5198,13 +12426,26 @@ function ensureAutoAuditObserver() {
     const previous = autoRuntime.enabled;
     autoRuntime.enabled = next;
     autoRuntime.conversationKey = autoBoundConversationKey || currentConversationKey();
+
+    if (next) {
+      writeA3Intent(true, autoRuntime.conversationKey, {
+        startTransaction: Boolean(startHandoffIsCommitted(readStartAuditHandoff()))
+      });
+    } else {
+      clearA3Intent();
+      clearStartAuditHandoff();
+    }
+
     if (!saveAutoRuntime()) {
       autoRuntime.enabled = previous;
+      if (previous) writeA3Intent(true, autoRuntime.conversationKey);
+      else clearA3Intent();
       renderAutoAuditState();
       return;
     }
 
     if (!next) {
+      clearAutoComposerHold();
       clearAutoTimers();
       releaseAutoLease(autoBoundConversationKey);
       ensureAutoAuditObserver();
@@ -5215,8 +12456,17 @@ function ensureAutoAuditObserver() {
 
     claimAutoLease();
     startAutoAuditMonitor({ immediate: true });
+
+    const turns = getChatGPTTurns();
+    if (autoRuntime.stage === 'idle') {
+      reconcileEnabledIdleAuditRuntime(turns, { source: 'explicit-enable' });
+    }
+
     evaluateAutoAudit().catch(error => pauseAutoAudit(`Monitor start failed: ${error?.message || 'unexpected runtime error'}.`));
-    setStatus('Auto 3 waves enabled for this chat only. New conversations stay disabled until enabled explicitly.', 'success');
+
+    if (autoRuntime.stage === 'idle') {
+      setStatus('Auto 3 waves enabled for this chat. No resumable audit lineage is currently proven; waiting for Audit Core.', 'success');
+    }
   }
 
   function renderConfirm() {
@@ -5548,9 +12798,36 @@ function ensureAutoAuditObserver() {
   }
 
   function attachEvents() {
+    panel.querySelector('#acb-new-chat').addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      openNewChatFromWidget();
+    });
+
+    panel.querySelector('#acb-super-toggle').addEventListener('click', () => {
+      const next = !state.superCompact;
+      if (!commitStateMutation(
+        () => {
+          state.superCompact = next;
+          if (next) state.collapsed = false;
+        },
+        'Super compact display mode could not be persisted; the previous display state was restored.'
+      )) return;
+
+      clampPanelPosition({ report: true });
+      renderAutoAuditState();
+
+      if (!next) {
+        setStatus('Full widget restored.', 'success');
+      }
+    });
+
     panel.querySelector('#acb-collapse').addEventListener('click', () => {
       if (!commitStateMutation(
-        () => { state.collapsed = !state.collapsed; },
+        () => {
+          state.superCompact = false;
+          state.collapsed = !state.collapsed;
+        },
         'Collapse state could not be persisted; the previous display state was restored.'
       )) return;
       clampPanelPosition({ report: true });
@@ -5591,8 +12868,56 @@ function ensureAutoAuditObserver() {
       setStatus(`Position ${state.posLocked ? 'locked' : 'unlocked'}.`, 'success');
     });
 
+    const handleAuditStepActivation = event => {
+      const step = event.target.closest('[data-step]');
+      if (!step) return;
+      if (event.type === 'keydown' && !['Enter', ' '].includes(event.key)) return;
+      if (event.type === 'keydown') event.preventDefault();
+      const kind = auditKindFromStep(step.dataset.step);
+      if (kind) copyCompletedAudit(kind).catch(error => {
+        setStatus(`Audit copy failed: ${error?.message || 'unexpected clipboard error'}.`, 'error');
+      });
+    };
+    panel.querySelector('#acb-auto-progress').addEventListener('click', handleAuditStepActivation);
+    panel.querySelector('#acb-auto-progress').addEventListener('keydown', handleAuditStepActivation);
+    panel.querySelector('#acb-super-progress').addEventListener('click', handleAuditStepActivation);
+    panel.querySelector('#acb-super-progress').addEventListener('keydown', handleAuditStepActivation);
+
     panel.querySelector('#acb-auto-enabled').addEventListener('change', event => {
       setAutoAuditEnabled(event.target.checked);
+    });
+
+    panel.querySelector('#acb-super-enabled').addEventListener('change', event => {
+      setAutoAuditEnabled(event.target.checked);
+    });
+
+    panel.querySelector('#acb-save-now').addEventListener('click', () => {
+      syncSaveCurrentChatStateNow().catch(error => {
+        manualAuditSyncInFlight = false;
+        setStatus(`SYNC/SAVE failed: ${error?.message || 'unexpected persistence error'}. Cached audits and runtime state were not intentionally discarded.`, 'error');
+        renderAutoAuditState();
+      });
+    });
+
+    panel.querySelector('#acb-super-state').addEventListener('click', event => {
+      const action = String(event.currentTarget?.dataset?.action || 'none');
+
+      if (action === 'start-audit') {
+        startAuditCoreFromReadyAttachment().catch(error => {
+          setStatus(`START AUDITING failed: ${error?.message || 'unexpected Core launch error'}.`, 'error');
+          auditStartInFlight = false;
+          renderAutoAuditState();
+        });
+        return;
+      }
+
+      if (action === 'sync-save') {
+        syncSaveCurrentChatStateNow().catch(error => {
+          manualAuditSyncInFlight = false;
+          setStatus(`SYNC/SAVE failed: ${error?.message || 'unexpected persistence error'}. Cached audits and runtime state were not intentionally discarded.`, 'error');
+          renderAutoAuditState();
+        });
+      }
     });
 
     panel.querySelector('#acb-auto-gate').addEventListener('change', event => {
@@ -5643,6 +12968,115 @@ function ensureAutoAuditObserver() {
           ? 'File attachment for every ChatGPT command'
           : 'Raw text insertion';
       setStatus(`ChatGPT prompt delivery: ${label}.`, 'success');
+    });
+
+    panel.querySelector('#acb-auto-rename-chat').addEventListener('change', event => {
+      const next = Boolean(event.target.checked);
+      if (!commitStateMutation(
+        () => { state.autoRenameChat = next; },
+        'Chat auto-rename setting could not be persisted; the previous value was restored.'
+      )) return;
+      renderAutoAuditState();
+      setStatus(`Chat auto-rename ${next ? 'enabled' : 'disabled'}.`, 'success');
+      if (next && autoRuntime?.projectName) {
+        const renameContext = {
+          source: autoRuntime.projectNameSource || 'artifact',
+          conversationKey: currentConversationKey(),
+          runStartedAt: autoRuntime.startedAt
+        };
+        maybeRenameConversation(autoRuntime.projectName, renameContext).catch(() => { });
+        scheduleConversationTitleGuard(autoRuntime.projectName, renameContext);
+      } else if (!next) {
+        conversationTitleGuardToken = '';
+        conversationTitleGuardStartedAt = 0;
+        conversationTitleGuardRunStartedAt = 0;
+      }
+    });
+
+    panel.querySelector('#acb-bridge-enabled').addEventListener('change', event => {
+      const next = Boolean(event.target.checked);
+      if (!commitStateMutation(
+        () => { state.bridgeEnabled = next; },
+        'Bridge enablement could not be persisted; the previous value was restored.'
+      )) return;
+
+      bridgeState = next ? 'unknown' : 'disabled';
+      bridgeMessage = next ? 'Bridge enabled; checking localhost service.' : 'Bridge integration disabled; browser-folder fallback is available.';
+      renderAutoAuditState();
+
+      if (next) {
+        checkBridge({ force: true }).catch(() => { });
+      } else {
+        clearBridgeFlushTimer();
+      }
+    });
+
+    panel.querySelector('#acb-bridge-url').addEventListener('change', event => {
+      const candidate = String(event.target.value || '').trim();
+      const normalized = normalizedBridgeUrl(candidate);
+      if (!normalized) {
+        event.target.value = state.bridgeUrl || BRIDGE_DEFAULT_URL;
+        setStatus('Bridge URL rejected. Only loopback HTTP URLs such as http://127.0.0.1:17843 are allowed.', 'error');
+        return;
+      }
+
+      if (!commitStateMutation(
+        () => { state.bridgeUrl = normalized; },
+        'Bridge URL could not be persisted; the previous value was restored.'
+      )) return;
+
+      bridgeState = 'unknown';
+      bridgeMessage = 'Bridge URL changed; run Check + flush.';
+      renderBridgeState();
+      if (state.bridgeEnabled) checkBridge({ force: true }).catch(() => { });
+    });
+
+    panel.querySelector('#acb-bridge-save-token').addEventListener('click', () => {
+      const input = panel.querySelector('#acb-bridge-token');
+      const value = String(input?.value || '').trim();
+      if (!value) {
+        setStatus(bridgeToken()
+          ? 'A bridge token is already stored. Paste a replacement only if you want to rotate it.'
+          : 'Paste the ACBBridge token first.', bridgeToken() ? 'info' : 'warning');
+        return;
+      }
+
+      if (!saveBridgeToken(value)) return;
+      input.value = '';
+      input.placeholder = 'Token stored · paste only to replace';
+      resetBridgeFailedJobs('invalid_auth');
+      bridgeState = 'unknown';
+      bridgeMessage = 'Token saved; checking bridge.';
+      renderBridgeState();
+      setStatus('ACBBridge token saved locally in Tampermonkey storage. It is not placed in prompts, filenames, or preset exports.', 'success');
+      checkBridge({ force: true }).catch(() => { });
+    });
+
+    panel.querySelector('#acb-bridge-check').addEventListener('click', () => {
+      checkBridge({ force: true })
+        .then(ok => {
+          if (ok) setStatus('ACBBridge connected. Queued audit saves are being flushed.', 'success');
+          else setStatus(`ACBBridge check did not reach writable authenticated state: ${bridgeMessage}`, 'warning');
+        })
+        .catch(error => setStatus(`ACBBridge check failed: ${error?.message || 'unexpected bridge error'}.`, 'error'));
+    });
+
+    panel.querySelector('#acb-choose-audit-folder').addEventListener('click', () => {
+      chooseAuditOutputFolder().catch(error => setStatus(`Audit folder selection failed: ${error?.message || 'unexpected error'}.`, 'error'));
+    });
+
+    panel.querySelector('#acb-flush-audit-files').addEventListener('click', () => {
+      flushCurrentAuditResultsToFolder({ force: true })
+        .then(result => {
+          if (!result.ready) {
+            setStatus('No completed audit wave is cached in this chat yet.', 'info');
+          } else if (result.saved === result.ready) {
+            setStatus(`Saved ${result.saved}/${result.ready} cached wave(s)${result.combined ? ' plus ALL_3' : ''} to the linked audit folder.`, 'success');
+          } else {
+            setStatus(`Saved ${result.saved}/${result.ready} cached wave(s). Folder permission/state still needs attention for the rest.`, 'warning');
+          }
+        })
+        .catch(error => setStatus(`Cached audit save failed: ${error?.message || 'unexpected file error'}.`, 'error'));
     });
 
     panel.querySelector('#acb-auto-reset').addEventListener('click', () => {
@@ -5884,6 +13318,117 @@ function ensureAutoAuditObserver() {
     }
   }
 
+  function clearWidgetBootstrapRetries() {
+    for (const timer of widgetBootstrapTimers) clearTimeout(timer);
+    widgetBootstrapTimers = [];
+    if (widgetBootstrapObserver) {
+      widgetBootstrapObserver.disconnect();
+      widgetBootstrapObserver = null;
+    }
+  }
+
+  function ensureWidgetConnected() {
+    if (!document.body) return false;
+
+    // React/ChatGPT may replace or temporarily rebuild top-level document
+    // children during hard reload/hydration. Keep the already-initialized panel
+    // alive instead of creating a second widget and duplicating listeners.
+    if (panel) {
+      if (!panel.isConnected) document.body.appendChild(panel);
+      if (fileInput && !fileInput.isConnected) document.body.appendChild(fileInput);
+      return panel.isConnected;
+    }
+
+    try {
+      mount();
+      return Boolean(panel?.isConnected);
+    } catch (error) {
+      console.error('[AI ChatButtons] widget mount failed; bootstrap will retry.', error);
+      try { panel?.remove(); } catch (_) { }
+      try { fileInput?.remove(); } catch (_) { }
+      panel = null;
+      fileInput = null;
+      return false;
+    }
+  }
+
+  function installWidgetGuardian() {
+    if (typeof MutationObserver !== 'function') return;
+
+    if (!widgetGuardianObserver) {
+      widgetGuardianObserver = new MutationObserver(() => {
+        const bodyChanged = widgetGuardianBody !== document.body;
+        const auditRootDetached = Boolean(autoAuditObserverRoot && !autoAuditObserverRoot.isConnected);
+        if (bodyChanged) installWidgetGuardian();
+        if (!panel?.isConnected) ensureWidgetConnected();
+        if (auditRootDetached) {
+          ensureAutoAuditObserver();
+          if (autoRuntime?.enabled) scheduleAutoAuditCheck(80);
+        }
+      });
+    }
+
+    widgetGuardianObserver.disconnect();
+    widgetGuardianBody = document.body || null;
+
+    // Only watch top-level children. This catches BODY replacement and removal
+    // of our direct BODY child without subscribing to ChatGPT's mutation-heavy
+    // streaming subtree.
+    if (document.documentElement) {
+      widgetGuardianObserver.observe(document.documentElement, { childList: true });
+    }
+    if (document.body) {
+      widgetGuardianObserver.observe(document.body, { childList: true });
+    }
+
+    // `main` can be replaced without removing BODY itself. Watch only its direct
+    // parent, not the whole streaming subtree, so root replacement is detected
+    // cheaply and the Auto3 observer can be re-anchored.
+    const auditRoot = document.querySelector?.('main');
+    const auditRootParent = auditRoot?.parentElement || null;
+    if (
+      auditRootParent &&
+      auditRootParent !== document.body &&
+      auditRootParent !== document.documentElement
+    ) {
+      widgetGuardianObserver.observe(auditRootParent, { childList: true });
+    }
+  }
+
+  function armWidgetBootstrap() {
+    const attempt = () => {
+      if (!ensureWidgetConnected()) return false;
+      clearWidgetBootstrapRetries();
+      installWidgetGuardian();
+      return true;
+    };
+
+    if (attempt()) return;
+
+    // @run-at document-start is early enough that documentElement/body are not
+    // guaranteed to exist in every Brave/Tampermonkey navigation. Observe the
+    // Document itself first, then switch to the cheap top-level guardian after
+    // a successful mount. This closes the intermittent F5 "no widget" race.
+    if (typeof MutationObserver === 'function') {
+      widgetBootstrapObserver = new MutationObserver(() => { attempt(); });
+      try {
+        widgetBootstrapObserver.observe(document, { childList: true, subtree: true });
+      } catch (error) {
+        console.error('[AI ChatButtons] bootstrap observer failed; timed retries remain active.', error);
+      }
+    }
+
+    widgetBootstrapTimers = WIDGET_BOOTSTRAP_RETRY_DELAYS_MS.map(delay =>
+      setTimeout(attempt, delay)
+    );
+
+    document.addEventListener('DOMContentLoaded', attempt, { once: true });
+    document.addEventListener('readystatechange', attempt);
+    window.addEventListener('load', attempt, { once: true });
+    window.addEventListener('pageshow', attempt);
+    window.addEventListener('focus', attempt);
+  }
+
   function mount() {
     if (panel || !document.body) return;
     state = loadState();
@@ -5898,6 +13443,23 @@ function ensureAutoAuditObserver() {
       <div id="acb-titlebar">
         <div id="acb-title">AI ChatButtons</div>
         <div id="acb-site" title="Current site">${escapeHTML(site.label)}</div>
+
+        <div id="acb-super-controls" aria-label="Super compact Auto3 monitor">
+          <span id="acb-super-brand" title="No audit project detected in this chat.">CHAT</span>
+          <label id="acb-super-auto-label" for="acb-super-enabled" title="Auto3 for this chat">
+            <span>A3</span>
+            <input id="acb-super-enabled" type="checkbox" aria-label="Auto3 for this chat" />
+          </label>
+          <div id="acb-super-progress" aria-label="Audit stages; completed stages can be clicked to copy">
+            <button type="button" class="acb-super-step" data-step="1" data-state="idle" title="Audit Core">1</button>
+            <button type="button" class="acb-super-step" data-step="2" data-state="idle" title="Audit Second Wave">2</button>
+            <button type="button" class="acb-super-step" data-step="3" data-state="idle" title="Audit Performance">3</button>
+          </div>
+          <button id="acb-super-state" type="button" data-kind="info" data-action="sync-save" title="Audit state. READY becomes START when a project file is attached; otherwise click to SYNC/SAVE current audit state.">CHAT</button>
+        </div>
+
+        <button id="acb-new-chat" type="button" title="New Chat. If current work is active/unsaved, opens the new chat separately so this audit is not orphaned.">+</button>
+        <button id="acb-super-toggle" type="button" aria-pressed="false" title="Switch to the one-line Auto3 monitor">Mini</button>
         <button id="acb-collapse" type="button" aria-expanded="true" title="Collapse the widget to the title bar">Collapse</button>
       </div>
 
@@ -5911,19 +13473,23 @@ function ensureAutoAuditObserver() {
         <div id="acb-view-commands" class="acb-view" role="tabpanel">
           <div id="acb-auto-audit">
             <div id="acb-auto-head">
-              <label id="acb-auto-toggle-label" for="acb-auto-enabled" title="Automatically continue Core -> Second Wave -> Performance for this ChatGPT conversation only. Other chats keep independent chains.">
+              <label id="acb-auto-toggle-label" for="acb-auto-enabled" title="Automatically continue Core -> Second Wave -> Performance for this ChatGPT conversation only.">
                 <input id="acb-auto-enabled" type="checkbox" />
-                <span>Auto 3 waves · this chat</span>
+                <span>Auto3</span>
               </label>
               <button id="acb-auto-adopt" type="button" title="Resume/recover automation from the latest audit turn in this ChatGPT conversation.">Resume</button>
-              <button id="acb-auto-stop" type="button" title="Pause the active chain without disabling Auto 3 waves globally.">Pause</button>
+              <button id="acb-auto-stop" type="button" title="Pause the active chain without disabling Auto3.">Pause</button>
             </div>
             <div id="acb-auto-progress" aria-label="Audit chain progress">
-              <div class="acb-auto-step" data-step="1" data-state="idle">1 Core</div>
-              <div class="acb-auto-step" data-step="2" data-state="idle">2 Second</div>
-              <div class="acb-auto-step" data-step="3" data-state="idle">3 Perf</div>
+              <button type="button" class="acb-auto-step" data-step="1" data-state="idle">1 Core</button>
+              <button type="button" class="acb-auto-step" data-step="2" data-state="idle">2 Second</button>
+              <button type="button" class="acb-auto-step" data-step="3" data-state="idle">3 Perf</button>
             </div>
-            <div id="acb-auto-state" data-kind="info">Auto chain disabled.</div>
+            <div id="acb-auto-state-row">
+              <div id="acb-auto-state" data-kind="info">Auto chain disabled.</div>
+              <button id="acb-save-now" type="button" data-state="idle" title="SYNC/SAVE current chat: persist runtime, rescan COMPLETE waves, force-confirm disk output, and refresh ALL_3 when possible.">SAVE</button>
+            </div>
+            <div id="acb-audit-copy-hint">Attach project + START = arm Auto3 automatically · normal chat stays inert · every COMPLETE is saved.</div>
           </div>
 
           <div id="acb-audit-quick">
@@ -6026,7 +13592,7 @@ function ensureAutoAuditObserver() {
 
           <div class="acb-section">
             <div class="acb-section-title">Auto 3 waves</div>
-            <div class="acb-section-note">Advanced automation settings. The main Run screen keeps only the toggle, progress and recovery controls.</div>
+            <div class="acb-section-note">Smart mode: normal chat is inert. Attach a project and press START to arm the full Core → Second → Performance chain automatically.</div>
             <div id="acb-auto-config">
               <div class="acb-auto-field">
                 <label for="acb-auto-gate">Completion gate</label>
@@ -6067,6 +13633,50 @@ function ensureAutoAuditObserver() {
           </div>
 
           <div class="acb-section">
+            <div class="acb-section-title">Audit output automation</div>
+            <div class="acb-section-note">Completed waves are cached first. ACBBridge is the primary unattended disk route; bridge/disk outages never stop Auto3.</div>
+
+            <div id="acb-audit-output-controls">
+              <label class="acb-check-row" for="acb-auto-rename-chat" title="Rename the current ChatGPT conversation to the detected project name.">
+                <input id="acb-auto-rename-chat" type="checkbox" />
+                <span>Rename chat to project</span>
+              </label>
+              <div class="acb-section-note" title="Every structurally COMPLETE audit wave is always queued for persistence. This is no longer user-disableable.">Auto SAVE on COMPLETE: ALWAYS ON</div>
+            </div>
+
+            <div class="acb-section-title">Audit Disk Bridge</div>
+            <div id="acb-bridge-config">
+              <label class="acb-check-row acb-bridge-wide" for="acb-bridge-enabled" title="Use local ACBBridge instead of browser folder permissions.">
+                <input id="acb-bridge-enabled" type="checkbox" />
+                <span>Use ACBBridge (recommended)</span>
+              </label>
+
+              <div class="acb-field acb-bridge-wide">
+                <label class="acb-label" for="acb-bridge-url">Bridge URL</label>
+                <input id="acb-bridge-url" type="text" spellcheck="false" autocomplete="off" value="http://127.0.0.1:17843" />
+              </div>
+
+              <div class="acb-field acb-bridge-wide">
+                <label class="acb-label" for="acb-bridge-token">Token</label>
+                <input id="acb-bridge-token" type="password" spellcheck="false" autocomplete="new-password" placeholder="Paste once; stored token is never displayed" />
+              </div>
+
+              <button id="acb-bridge-save-token" type="button" title="Store the token in Tampermonkey storage and retry authentication failures.">Save token</button>
+              <button id="acb-bridge-check" type="button" title="Check /health and authenticated /v1/status, then flush queued audit saves.">Check + flush</button>
+            </div>
+            <div id="acb-bridge-state" data-state="warning">UNKNOWN · queued 0 · failed 0</div>
+
+            <div id="acb-browser-fallback">
+              <div class="acb-section-note">Optional browser-folder fallback. Used only when ACBBridge is disabled.</div>
+              <div id="acb-fallback-output-controls">
+                <button id="acb-choose-audit-folder" type="button" title="Optional File System Access fallback.">Choose fallback folder</button>
+                <button id="acb-flush-audit-files" type="button" title="Write cached results through the browser folder fallback.">Save cached via fallback</button>
+              </div>
+              <div id="acb-audit-folder-state" data-state="warning">Fallback folder not checked yet.</div>
+            </div>
+          </div>
+
+          <div class="acb-section">
             <div class="acb-section-title">Preset data</div>
             <div id="acb-settings-data">
               <button id="acb-import" type="button">Import presets</button>
@@ -6102,14 +13712,65 @@ function ensureAutoAuditObserver() {
     applyDisplayState();
     clampPanelPosition({ report: true });
     updateLockState();
-    attachEvents();
+    installBridgeQueueListener();
+    installAuditResultListener();
+
     if (site.key === 'chatgpt') {
       startAutoAuditMonitor({ immediate: true });
+
+      if (state.bridgeEnabled) {
+        setTimeout(() => {
+          checkBridge().catch(() => { });
+          scheduleBridgeFlush(100);
+        }, 500);
+      } else {
+        refreshAuditDirectoryState().catch(() => { });
+      }
+
+      setTimeout(() => {
+        const captured = backfillVisibleCompletedAuditResults();
+        if (captured) {
+          for (const record of currentChatAuditRecords()) {
+            if (state.autoSaveAuditFiles && state.bridgeEnabled && record?.text && !record.bridgeSavedAt) {
+              enqueueBridgeAuditRecord(record);
+            }
+          }
+          renderAutoAuditState();
+          if (autoRuntime?.enabled && autoRuntime.stage === 'idle') {
+            reconcileEnabledIdleAuditRuntime(getChatGPTTurns(), { source: 'delayed-backfill' });
+          }
+        }
+      }, 1200);
     }
+
+    // Bind page/global UI listeners last. If any earlier bootstrap/runtime step
+    // throws, ensureWidgetConnected() can retry without leaving duplicate window
+    // pointer/resize/visibility listeners attached to an abandoned panel.
+    attachEvents();
   }
 
   function releasePageAutomationOwnership() {
+    disconnectProjectTitleObserver();
+
+    if (manualAuditSyncFeedbackTimer) {
+      clearTimeout(manualAuditSyncFeedbackTimer);
+      manualAuditSyncFeedbackTimer = 0;
+    }
+
+    conversationTitleGuardToken = '';
+    conversationTitleGuardStartedAt = 0;
+    conversationTitleGuardProject = '';
+    conversationTitleGuardConversationKey = '';
+    conversationTitleGuardRunStartedAt = 0;
+
+    const pendingStart = readStartAuditHandoff();
+    if (pendingStart && !startHandoffIsCommitted(pendingStart) && !startHandoffIsPrepared(pendingStart)) {
+      clearStartAuditHandoff();
+    }
+    const committedSend = readCommittedAutoSend();
+    if (committedSend && committedSend.phase !== 'clicked') clearCommittedAutoSend();
     releaseAutoLease(autoBoundConversationKey);
+    releaseBridgeFlushLease();
     if (autoBoundConversationKey?.startsWith('c:')) {
       try { sessionStorage.removeItem(AUTO_DRAFT_SESSION_KEY); } catch (_) { }
     }
@@ -6119,16 +13780,7 @@ function ensureAutoAuditObserver() {
   window.addEventListener('beforeunload', releasePageAutomationOwnership);
 
   function init() {
-    if (document.body) {
-      mount();
-      return;
-    }
-    const observer = new MutationObserver(() => {
-      if (!document.body) return;
-      observer.disconnect();
-      mount();
-    });
-    observer.observe(document.documentElement, { childList: true });
+    armWidgetBootstrap();
   }
 
   if (globalThis.__ACB_ENABLE_TEST_HOOK__) {
@@ -6144,8 +13796,12 @@ function ensureAutoAuditObserver() {
           AUTO_RUNTIME_PREFIX,
           AUTO_LEGACY_RUNTIME_KEY,
           AUTO_LEGACY_SESSION_KEY,
+          AUTO_AUDIT_RESULT_SIGNAL_KEY,
           AUTO_TAB_SESSION_KEY,
-          AUTO_DRAFT_SESSION_KEY
+          AUTO_DRAFT_SESSION_KEY,
+          BRIDGE_DEFAULT_URL,
+          BRIDGE_JOB_PREFIX,
+          BRIDGE_QUEUE_SIGNAL_KEY
         },
         storage: {
           gmGet: GM_getValue,
@@ -6157,6 +13813,70 @@ function ensureAutoAuditObserver() {
         get autoInstanceId() { return autoInstanceId; },
         classifyAuditMessage,
         classifyAuditTurn,
+        auditTurnIsContinuation,
+        knownAuditReceiptKind,
+        trivialStartComposerNoise,
+        prepareComposerForExplicitAuditStart,
+        projectNameFromAuditText,
+        looksOpaqueIdentity,
+        sanitizeProjectIdentity,
+        supportedProjectAttachmentFilename,
+        projectNameFromArtifactFilename,
+        projectNameFromAttachmentFilename,
+        projectNameFromComposerAttachments,
+        reconcileProjectIdentityFromComposer,
+        currentSidebarConversationTitle,
+        sanitizeConversationLabel,
+        documentConversationLabel,
+        currentMiniIdentity,
+        currentConversationTitleMatches,
+        waitForVisibleConversationTitle,
+        applyLocalSidebarConversationTitle,
+        applyPersistentLocalProjectTitle,
+        ensureProjectTitleObserver,
+        disconnectProjectTitleObserver,
+        markConversationTitlePersisted,
+        renameGuardContextValid,
+        scheduleConversationTitleGuard,
+        auditResultFilename,
+        captureCompletedAudit,
+        readAuditResultFresh,
+        writeAuditResult,
+        patchAuditResult,
+        auditResultWriteMatchesCurrentRuntime,
+        currentChatAuditRecords,
+        visibleAuditLineage,
+        createAuditRunId,
+        normalizedBridgeUrl,
+        bridgeQueueStats,
+        enqueueBridgeAuditRecord,
+        bridgeJobRequest,
+        readBridgeJob,
+        auditHandoffIntegrity,
+        concreteHandoffState,
+        responseGate,
+        auditTestMetadata,
+        parseAuditHandoffParts,
+        buildCompactAll3Text,
+        checkBridge,
+        flushBridgeQueue,
+        renewBridgeFlushLease,
+        flushBridgeQueueManualReliable,
+        createBridgeMaterializeReceipt,
+        createBridgeMaterializeRunId,
+        setManualAuditSyncFeedback,
+        saveCurrentChatAuditsNow,
+        syncSaveCurrentChatStateNow,
+        setAuditAutoSaveEnabled,
+        autoProgressSnapshot,
+        userTurnTextCandidates,
+        latestChatGPTAssistantTurn,
+        latestRecognizableAuditUserTurn,
+        activeStageAnchorId,
+        recoverVirtualizedStageAssistant,
+        visibleUserConflictsWithActiveStage,
+        resumeAutoAuditFromConversation,
+        resetAutoAuditRuntime,
         buildAssistantSnapshot,
         completedAssistantCandidate,
         setAutoAuditEnabled,
@@ -6177,22 +13897,79 @@ function ensureAutoAuditObserver() {
         createAutoSendOwnershipGuard,
         chatGPTComposerReadyForAutoSend,
         chatGPTComposerRoot,
+        rawChatGPTComposerInput,
         getChatGPTInput,
+        getChatGPTSend,
+        isChatGPTSend,
+        chatGPTSendNearComposer,
+        chatGPTComposerReceiptState,
+        chatGPTComposerStillContainsReceipt,
+        chatGPTSendAccepted,
+        clickChatGPTSendVerified,
         chatGPTComposerAttachmentTiles,
+        chatGPTReadyComposerAttachments,
+        chatGPTReadyAttachmentSummary,
+        composerAttachmentSignature,
+        mutationTargetsOwnWidget,
+        externalMutationRecords,
+        mutationTouchesNode,
+        scheduleMiniAttachmentRefresh,
+        miniStartAuditState,
+        startAuditCoreFromReadyAttachment,
+        startHandoffComposerStillPrepared,
+        recoverArmedStartSend,
+        readStartAuditHandoff,
+        beginStartAuditHandoff,
+        armStartAuditHandoffForSend,
+        markStartAuditHandoffClicking,
+        startHandoffIsPrepared,
+        startHandoffIsCommitted,
+        startHandoffRouteProven,
+        markStartAuditHandoffSent,
+        runtimeIsBlankDisabled,
+        runtimeIsStartClaimable,
+        startHandoffCanFollowRoute,
+        migrateStartHandoffRuntime,
+        recoverSentStartCore,
         chatGPTIsGenerating,
+        chatGPTAuthInterstitialVisible,
+        chatGPTLoggedOutRootVisible,
+        chatGPTRootIsQuarantined,
+        rememberStableConversationKey,
+        lastStableConversationKey,
+        readA3Intent,
+        writeA3Intent,
+        a3IntentAllowsConversation,
+        adoptA3IntentForConversation,
+        committedStartOwnsConversationKey,
+        forceCommittedStartEnabledForKey,
+        activeAuditNeedsRouteProtection,
+        shouldPreservePreviousStableKey,
+        reconcileEnabledIdleAuditRuntime,
         composerPlainText,
         previousAuditUserTurn,
+        auditUserFlowAfter,
+        latestExpectedAuditUserTurn,
+        latestAssistantAfterTurn,
+        assistantStronglyMatchesAuditWave,
+        auditAssistantAcrossSupplementals,
+        sidecarContextCountAfter,
+        watchSupplementalAuditContext,
         latestChatGPTUserTurn,
+        armFromCoreTurn,
         resumeRuntimeFromAuditTurn,
         getTurnId,
         turnRole,
         getChatGPTTurns,
         findTurnById,
         stageForAuditKind,
+        reconcileExecutionGap,
         loadLegacyAutoRuntimeForCurrentConversation,
+        readStoredRuntime,
         loadAutoRuntime,
         normalizeAutoRuntime,
         emptyAutoRuntime,
+        persistRuntimeForKey,
         refreshAutoRuntimeFromStorage,
         bindAutoRuntimeToCurrentConversation,
         saveAutoRuntime,
@@ -6204,6 +13981,9 @@ function ensureAutoAuditObserver() {
         detectSite,
         ensureAutoAuditObserver,
         autoAuditObserverConfig,
+        ensureWidgetConnected,
+        installWidgetGuardian,
+        armWidgetBootstrap,
         mount,
         startAutoAuditMonitor,
         stopAutoAuditMonitor,

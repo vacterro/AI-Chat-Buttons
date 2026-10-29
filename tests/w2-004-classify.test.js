@@ -28,11 +28,13 @@ test('W2-004: em/en/hyphen dash framing classifies', () => {
   assert.strictEqual(api.classifyAuditMessage('AUDIT CORE—full sweep'), '');
 });
 
-test('W2-004: marker must be first meaningful authored line', () => {
+test('W2-004: only exact authored command lines classify, including after attachment framing', () => {
   const { api } = setup();
   assert.strictEqual(api.classifyAuditMessage('please run AUDIT CORE on this'), '');
-  assert.strictEqual(api.classifyAuditMessage('I want to start\nAUDIT CORE — now'), '');
-  assert.strictEqual(api.classifyAuditMessage('---\nAUDIT CORE — now'), '');
+  assert.strictEqual(api.classifyAuditMessage('I want to start\nAUDIT CORE — now'), 'core');
+  assert.strictEqual(api.classifyAuditMessage('---\nAUDIT CORE — now'), 'core');
+  assert.strictEqual(api.classifyAuditMessage('project.zip\nAUDIT CORE\nThe complete command is attached as "AUDIT_CORE_test.md".'), 'core');
+  assert.strictEqual(api.classifyAuditMessage('project.zip\n```\nAUDIT CORE\n```'), '');
   assert.strictEqual(api.classifyAuditMessage('Some context: "AUDIT CORE" is required'), '');
   assert.strictEqual(api.classifyAuditMessage(''), '');
   assert.strictEqual(api.classifyAuditMessage('   '), '');

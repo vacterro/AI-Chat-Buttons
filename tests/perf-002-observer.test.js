@@ -63,8 +63,9 @@ test('PERF-002: mutations schedule checks only while enabled', () => {
   api.autoRuntime.enabled = false;
   api.startAutoAuditMonitor();
   h.advance(0);
+  const pendingBefore = h.timers.pending().length;
   h.mutate(main);
-  assert.strictEqual(h.timers.pending().length, 0, 'disabled observer must not schedule checks');
+  assert.strictEqual(h.timers.pending().length, pendingBefore, 'disabled observer must not add audit checks to existing rendering timers');
 
   api.autoRuntime.enabled = true;
   api.autoRuntime.stage = 'wait-core';

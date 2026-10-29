@@ -4,7 +4,7 @@
 
 **A portable Tampermonkey command panel for the AI chats you already use.**
 
-[![Version](https://img.shields.io/badge/version-0.0.16-D4B86A?style=flat-square)](AICHATBUTTONS.js)
+[![Version](https://img.shields.io/badge/version-0.0.56-D4B86A?style=flat-square)](AICHATBUTTONS.js)
 [![Tampermonkey](https://img.shields.io/badge/Tampermonkey-userscript-00485B?style=flat-square&logo=tampermonkey&logoColor=white)](https://www.tampermonkey.net/)
 [![Platforms](https://img.shields.io/badge/platforms-16%2B-6B5A2B?style=flat-square)](#supported-platforms)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
@@ -38,6 +38,7 @@ The script activates only on the supported chat domains declared in its userscri
 | **Opacity** | 100%, 75%, 50%, and 25% levels |
 | **Persistence** | local state through Tampermonkey/GM storage |
 | **Built-in workflows** | reusable audit-oriented prompt presets and runtime state |
+| **Optional disk bridge** | [token-authenticated local audit output](ACBBridge/README.md) |
 
 ## Supported platforms
 

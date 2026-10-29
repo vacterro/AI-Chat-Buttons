@@ -43,7 +43,7 @@ test('PERF-005: snapshot extracts candidates, whole evidence and fingerprint in 
     'surface 0 answersurface 1 answersurface 2 answerchrome outside surfaces'
   );
   assert.match(snapshot.fingerprint, /^\d+:[0-9a-z]+$/);
-  assert.strictEqual(h.counters.innerTextReads, 7, 'three surfaces + message + turn, each read once');
+  assert.strictEqual(h.counters.innerTextReads, 4, 'three surfaces and the shared message/turn node, each read once');
 });
 
 test('PERF-005: candidate collection is bounded at 16 with early exit', () => {
@@ -55,7 +55,7 @@ test('PERF-005: candidate collection is bounded at 16 with early exit', () => {
   const snapshot = api.buildAssistantSnapshot(turn);
   assert.strictEqual(snapshot.candidates.length, 16, 'candidates must be capped');
   assert.strictEqual(snapshot.sourceCount, 16);
-  assert.strictEqual(h.counters.innerTextReads, 18, 'sixteen surface reads plus message and turn');
+  assert.strictEqual(h.counters.innerTextReads, 17, 'sixteen surface reads plus the shared message/turn node');
 });
 
 test('PERF-005: duplicate surfaces are collected once', () => {
@@ -85,7 +85,7 @@ test('PERF-005: completedAssistantCandidate extracts once and fingerprints stabl
 
   h.counters.innerTextReads = 0;
   const first = api.completedAssistantCandidate(turn);
-  assert.strictEqual(h.counters.innerTextReads, 7, 'gate, fallback and fingerprint share one extraction');
+  assert.strictEqual(h.counters.innerTextReads, 4, 'gate, fallback and fingerprint share one extraction');
   assert.strictEqual(first.complete, false, 'first evaluation arms the stabilization window');
   const armedKey = api.autoRuntime.stableResponseKey;
   assert.ok(armedKey, 'candidate arms a fingerprint key');
@@ -95,7 +95,7 @@ test('PERF-005: completedAssistantCandidate extracts once and fingerprints stabl
 
   h.counters.innerTextReads = 0;
   api.completedAssistantCandidate(turn);
-  assert.strictEqual(h.counters.innerTextReads, 7, 're-evaluation still extracts once');
+  assert.strictEqual(h.counters.innerTextReads, 4, 're-evaluation still extracts once');
 
   const message = turn.querySelector('[data-message-author-role="assistant"]');
   message.querySelector('.markdown')._text = 'surface 0 answer CHANGED';
@@ -112,6 +112,6 @@ test('PERF-005: completedAssistantCandidate respects the extraction cap too', ()
 
   h.counters.innerTextReads = 0;
   api.completedAssistantCandidate(turn);
-  assert.strictEqual(h.counters.innerTextReads, 18, 'candidate cap applies inside the whole evaluation');
+  assert.strictEqual(h.counters.innerTextReads, 17, 'candidate cap applies inside the whole evaluation');
   assert.ok(api.autoRuntime.stableResponseKey);
 });

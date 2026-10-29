@@ -4,13 +4,13 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const { setup, userTurn, assistantTurn, addTurns } = require('./helpers');
 
-test('W2-005: plain user message between core and second interrupts lineage', () => {
+test('W2-005: supplemental user context preserves the explicit audit lineage', () => {
   const { h, api } = setup();
   const core = userTurn(h, 'c1', 'AUDIT CORE — sweep');
   const interruption = userTurn(h, 'u-int', 'how are you?');
   const second = userTurn(h, 's1', 'AUDIT SECOND WAVE — narrow');
   addTurns(h, [core, interruption, second]);
-  assert.strictEqual(api.previousAuditUserTurn(second, 'core'), null);
+  assert.strictEqual(api.previousAuditUserTurn(second, 'core'), core);
   assert.strictEqual(api.previousAuditUserTurn(second, 'second'), null);
 });
 
@@ -75,14 +75,15 @@ test('W2-005: standalone turn without lineage returns null', () => {
   assert.strictEqual(api.previousAuditUserTurn(second, 'second'), null);
 });
 
-test('W2-005: resumeRuntimeFromAuditTurn rejects interrupted lineage', () => {
+test('W2-005: resumeRuntimeFromAuditTurn accepts supplemental user context', () => {
   const { h, api } = setup();
   const core = userTurn(h, 'c1', 'AUDIT CORE — sweep');
   const interruption = userTurn(h, 'u-int', 'where did we leave off?');
   const second = userTurn(h, 's1', 'AUDIT SECOND WAVE — narrow');
   addTurns(h, [core, interruption, second]);
   api.autoRuntime.enabled = true;
-  assert.strictEqual(api.resumeRuntimeFromAuditTurn(second), false);
+  assert.strictEqual(api.resumeRuntimeFromAuditTurn(second), true);
+  assert.strictEqual(api.autoRuntime.coreUserId, 'c1');
 });
 
 test('W2-005: resumeRuntimeFromAuditTurn accepts unbroken lineage', () => {
